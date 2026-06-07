@@ -62,6 +62,79 @@ export function drawArena(): void {
     }
   }
 
+  // floor switches — pressure plates that light up when stood on
+  for (const s of game.switches) {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.fillStyle = 'rgba(0,0,0,.3)';
+    ctx.beginPath();
+    ctx.arc(0, 3, s.r, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = s.pressed ? '#5a4a2a' : '#3b3550';
+    ctx.beginPath();
+    ctx.arc(0, 0, s.r, 0, TAU);
+    ctx.fill();
+    // inner cap sinks slightly when pressed
+    ctx.fillStyle = s.pressed ? arena.accent : '#574d72';
+    ctx.beginPath();
+    ctx.arc(0, s.pressed ? 1 : -1, s.r * 0.62, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = s.pressed ? arena.accent : 'rgba(255,255,255,.18)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, s.r, 0, TAU);
+    ctx.stroke();
+    if (s.pressed) {
+      ctx.globalAlpha = 0.4 + 0.2 * Math.sin(game.time * 9);
+      ctx.beginPath();
+      ctx.arc(0, 0, s.r + 4, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // gates — solid bars that retract into a floor slot while their switch is held
+  for (const g of game.gates) {
+    if (g.open) {
+      // open: just the recessed slot, so players can read where it will close
+      ctx.fillStyle = 'rgba(0,0,0,.32)';
+      roundRectPath(g.x, g.y, g.w, g.h, 5);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.12)';
+      ctx.lineWidth = 1.5;
+      roundRectPath(g.x, g.y, g.w, g.h, 5);
+      ctx.stroke();
+      continue;
+    }
+    ctx.fillStyle = 'rgba(0,0,0,.3)';
+    roundRectPath(g.x + 3, g.y + 4, g.w, g.h, 6);
+    ctx.fill();
+    ctx.fillStyle = '#6a6276';
+    roundRectPath(g.x, g.y, g.w, g.h, 6);
+    ctx.fill();
+    ctx.fillStyle = '#857c92';
+    roundRectPath(g.x + 3, g.y + 3, g.w - 6, g.h - 6, 4);
+    ctx.fill();
+    // rivets along the bar's long axis
+    ctx.fillStyle = 'rgba(40,32,52,.7)';
+    const along = g.w >= g.h;
+    const n = Math.max(2, Math.floor((along ? g.w : g.h) / 24));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const rx = along ? g.x + g.w * t : g.x + g.w / 2;
+      const ry = along ? g.y + g.h / 2 : g.y + g.h * t;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 2, 0, TAU);
+      ctx.fill();
+    }
+    ctx.strokeStyle = arena.accent;
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 2;
+    roundRectPath(g.x, g.y, g.w, g.h, 6);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // walls (border)
   ctx.fillStyle = '#1a1226';
   ctx.fillRect(0, 0, W, WALL);

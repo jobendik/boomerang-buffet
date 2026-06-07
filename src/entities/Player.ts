@@ -6,7 +6,7 @@ import { CHARS } from '../data/characters';
 import { SPAWNS } from '../data/arena';
 import { POWERS, EXCLUSIVE_GROUPS, type PowerKey } from '../data/powers';
 import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
-import { resolveCircleObstacles, resolveCrushers, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
+import { resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
 import { spawnDashPuff, spawnExplosion, spawnRing, spawnSlice } from '../systems/effects';
 import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
@@ -48,6 +48,7 @@ interface PlayerStats {
   crushDeaths: number; // times squished by a block        -> "Trash Compactor"
   ghostKills: number; // kills landed after you're dead    -> "Vengeful Ghost"
   distance: number; // total ground covered (px)           -> "Most Enthusiastic"
+  switches: number; // floor switches stepped on           -> "Switcheroo"
 }
 
 /** A fighter — either the human (idx 0) or a CPU-controlled snack. */
@@ -132,6 +133,7 @@ export class Player {
       crushDeaths: 0,
       ghostKills: 0,
       distance: 0,
+      switches: 0,
     };
     this.reset(SPAWNS[idx % SPAWNS.length]);
     this.score = 0;
@@ -449,11 +451,14 @@ export class Player {
       this.y = BOUNDS.b - this.r;
       this.vy = 0;
     }
-    // PHASE DASH: ignore the solid obstacle layer for the duration of a dash,
-    // letting the fighter slip clean through walls (map bounds & crushers still
-    // stop them). On a stalled dash that ends mid-wall, the next frame's resolve
-    // simply pops them out the nearer side.
-    if (!(this.dashT > 0 && this.powers.has('PHASE'))) resolveCircleObstacles(this);
+    // PHASE DASH: ignore the solid obstacle layer (static walls + closed gates)
+    // for the duration of a dash, letting the fighter slip clean through (map
+    // bounds & crushers still stop them). On a stalled dash that ends mid-wall,
+    // the next frame's resolve simply pops them out the nearer side.
+    if (!(this.dashT > 0 && this.powers.has('PHASE'))) {
+      resolveCircleObstacles(this);
+      resolveGates(this);
+    }
     resolveCrushers(this); // crushing blocks are solid walls while at rest/moving
     resolvePortals(this, dt);
 

@@ -16,6 +16,10 @@ function lineHitsObstacle(x1: number, y1: number, x2: number, y2: number): boole
     for (const R of OBSTACLES) {
       if (px > R.x - 4 && px < R.x + R.w + 4 && py > R.y - 4 && py < R.y + R.h + 4) return true;
     }
+    // closed gates block line of sight too (an open one is passable)
+    for (const g of game.gates) {
+      if (!g.open && px > g.x - 4 && px < g.x + g.w + 4 && py > g.y - 4 && py < g.y + g.h + 4) return true;
+    }
   }
   return false;
 }

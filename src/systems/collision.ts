@@ -46,6 +46,49 @@ export function resolveCrushers(o: { x: number; y: number; r: number }): void {
   }
 }
 
+/** Push a circular body out of every CLOSED gate (an open gate is passable). */
+export function resolveGates(o: { x: number; y: number; r: number }): void {
+  for (const g of game.gates) {
+    if (g.open) continue;
+    const r = circleRect(o.x, o.y, o.r, g);
+    if (r.hit) {
+      o.x += r.nx! * r.pen!;
+      o.y += r.ny! * r.pen!;
+    }
+  }
+}
+
+/**
+ * Floor switches: recompute each plate's pressed state from who's standing on
+ * it, opening the linked gate while occupied. A fighter newly stepping onto a
+ * plate flips it — credited toward the "Switcheroo" award.
+ */
+export function updateSwitches(): void {
+  if (!game.switches.length) return;
+  for (const g of game.gates) g.open = false;
+  for (const s of game.switches) {
+    const now: number[] = [];
+    for (const p of game.players) {
+      if (!p.alive) continue;
+      if (dist(p.x, p.y, s.x, s.y) < s.r) now.push(p.idx);
+    }
+    // rising edges (idx present now but not last frame) count as a flip
+    for (const idx of now) {
+      if (!s.on.includes(idx)) {
+        const p = game.players.find((q) => q.idx === idx);
+        if (p) {
+          p.stats.switches++;
+          audio.tick();
+          spawnRing(s.x, s.y, '#ffce54', 0.9);
+        }
+      }
+    }
+    s.on = now;
+    s.pressed = now.length > 0;
+    if (s.pressed && game.gates[s.gate]) game.gates[s.gate].open = true;
+  }
+}
+
 /**
  * Fall-Protection: Extreme — treat every bottomless pit as a solid wall at
  * runtime, pushing a fighter out so they can never tumble in.

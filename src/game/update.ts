@@ -2,7 +2,7 @@ import { audio } from '../core/audio';
 import { dist, norm, rand } from '../core/math';
 import { keys, mouse } from '../core/input';
 import { aiThink } from '../systems/ai';
-import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire } from '../systems/collision';
+import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
 import { spawnRing } from '../systems/effects';
 import { game } from './state';
 import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
@@ -110,6 +110,7 @@ export function update(dt: number): void {
       p.update(dt, intents);
     }
     resolvePlayerCollisions(); // soft separation + frozen-shatter-on-bump
+    updateSwitches(); // floor switches drive their gates + the "Switcheroo" award
     for (const c of game.crushers) c.update(dt); // move blocks + squish the pinned
     spreadFire(); // burning fighters ignite their neighbours
     updateGolden(dt); // Golden Boomerang carry/score (no-op in other modes)

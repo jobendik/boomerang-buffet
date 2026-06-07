@@ -184,8 +184,9 @@ export class Boomerang {
         return;
       }
     }
-    // obstacle bounce
-    for (const R of OBSTACLES) {
+    // obstacle bounce (static walls + any closed gates, which are solid too)
+    const solids = game.gates.length ? [...OBSTACLES, ...game.gates.filter((g) => !g.open)] : OBSTACLES;
+    for (const R of solids) {
       const c = circleRect(this.x, this.y, this.r, R);
       if (c.hit) {
         this.x += c.nx! * c.pen!;
