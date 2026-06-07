@@ -69,7 +69,9 @@ is the bar.
 ### Current feature inventory (already done)
 Armed/unarmed state machine · clash/parry · charged curve throws · stackable
 powers (Fire/Ice/Bomb/Big/Multi/Extra/Caffeine/Shield/Warp/Stab/Last Laugh/
-Unstoppable/Hot Feet/Telekinesis/Bamboozle/**Disguise**) · contagious Burning ·
+Unstoppable/Hot Feet/Telekinesis/Bamboozle/**Disguise**/**Cool Walk**/
+**Weak Arm**) · elemental stacking (**Ice+Bomb freeze**, **Fire+Bomb fire-ring**,
+**burning/frozen paradox**) · contagious Burning ·
 brittle Frozen (mash-to-break) · soft player collision · Warp squash-kill ·
 3 arenas + random · bottomless pits + teleporters · **bushes (stealth cover)** ·
 **crushers (squish-kill)** · **rain (douses fire)** ·
@@ -137,21 +139,27 @@ These slot into the existing power architecture cleanly (`powers.ts` +
   (`drawProp` in `shapes.ts`: crate/bamboo/lantern); any move/attack/charge
   reverts. Bots can't see disguised players (`ai.ts`). Building block for
   Hide & Seek prop rendering.
+- **Cool Walk** ✅ DONE — ice-trail counterpart to Hot Feet (`IcePatch` hazard).
+  Stepping in it slows (`Player.chilled`) and stacks chill (`chillBuild`) that
+  freezes if you linger. Mutually exclusive with Hot Feet (`EXCLUSIVE_GROUPS`).
+- **Weak Arm** ✅ DONE — anti-power that halves throw range (`outTime *= 0.5` in
+  `doThrow`); barred from being the first book (`NEVER_FIRST`).
 - **Decoy** — on dash, spawn a short-lived clone mimicking appearance/boom count.
-- **Cool Walk** — ice-trail counterpart to Hot Feet (slows foes, then freezes).
 - **Delayed Death** — survive a lethal hit for ~2s before the death finalises
   (not vs pit/crush). Add a `dyingTimer`.
 - **Dash-Through-Walls** — ignore the solid layer during the dash vector.
-- **Weak Arm** — halve max throw distance (anti-power).
 - **Battle Royale** — shrinking lethal border toward the collection point
   (needs a dynamic-bounds system; larger).
 - **Stacking matrix** (blueprint "Complex Systemic Interactions"):
   - Ice + Explosive → blast **freezes** in a larger radius instead of killing.
-  - Fire + Explosive → ring of persistent fire around the blast.
-  - Multi + Explosive/Fire → already reduces split count (4 vs 5); verify radius
-    scaling.
-  - Burning + Frozen paradox → frozen block with burn timer still ticking under
-    it; on burn-out it dies and the ice shatters.
+    ✅ DONE (`Boomerang.explode`, R 112, freeze not kill).
+  - Fire + Explosive → ring of persistent fire around the blast. ✅ DONE
+    (8 `FirePatch`es ringing the blast).
+  - Burning + Frozen paradox → frozen block with burn timer still ticking; on
+    burn-out it dies and the ice shatters. ✅ DONE (freeze never clears burn;
+    shatter FX in `die`).
+  - Multi + Explosive → still drops the split to 4, but sub-projectiles don't
+    yet carry a (scaled-down) bomb. *(remaining)*
 
 ---
 
@@ -187,16 +195,15 @@ These slot into the existing power architecture cleanly (`powers.ts` +
 
 ## Suggested order for a fresh chat
 All four P1 features (Hide & Seek, Crushers + rain, Bushes + Rambo,
-Fall-Protection) and the Disguise power are ✅ done. Remaining, easiest first:
+Fall-Protection), the Disguise/Cool Walk/Weak Arm powers, and the elemental
+stacking matrix are ✅ done. Remaining, easiest first:
 
 1. **More powers** (P2) — the scaffolding is all in place now:
-   - **Cool Walk** — mirror of Hot Feet using a freezing `FirePatch`-style hazard.
-   - **Weak Arm** — halve max throw distance (anti-power; tweak `doThrow`).
    - **Decoy** — clone on dash (mimic appearance/boom count).
    - **Delayed Death** — survive a lethal hit ~2s (`dyingTimer`).
    - **Dash-Through-Walls** — skip the solid layer during the dash vector.
-2. **Elemental stacking matrix** (P2) — Ice+Bomb (freeze blast), Fire+Bomb
-   (ring of fire), Burning/Frozen paradox. (Multi+elemental already 4-split.)
+2. **Multi + Bomb** — propagate a scaled-down bomb to the 4 sub-projectiles
+   (`doSplit`), the one stacking-matrix case still missing.
 3. **More content** (P3) — toward 12 characters and biome-varied arenas;
    more awards (Vengeful Ghost, Most Enthusiastic, Switcheroo).
 4. **Battle Royale** power + **vertical dodge/jump** (P3, larger systems).

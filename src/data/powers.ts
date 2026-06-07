@@ -24,18 +24,27 @@ export const POWERS: Record<string, Power> = {
   TELEKINESIS: { name: 'Telekinesis', color: '#9d7bff', icon: '◉' },
   BAMBOOZLE: { name: 'Bamboozle', color: '#b06bff', icon: '?' },
   DISGUISE: { name: 'Disguise', color: '#9bd17a', icon: '⌂' },
+  COOLWALK: { name: 'Cool Walk', color: '#8fe6ff', icon: '❅' },
+  WEAKARM: { name: 'Weak Arm', color: '#b0a0c0', icon: '↧' },
 };
 
 export type PowerKey = keyof typeof POWERS;
 
 export const POWER_KEYS = Object.keys(POWERS) as PowerKey[];
 
-/** Elemental powers are mutually exclusive — acquiring one removes the other. */
-export const ELEMENTAL_EXCLUSIVE: PowerKey[] = ['FIRE', 'ICE'];
+/**
+ * Mutually-exclusive power groups — acquiring one member drops any others in
+ * the same group. Fire/Ice are the elemental pair; Hot Feet/Cool Walk are the
+ * trail pair (your footwear leaves one element, not both).
+ */
+export const EXCLUSIVE_GROUPS: PowerKey[][] = [
+  ['FIRE', 'ICE'],
+  ['HOTFEET', 'COOLWALK'],
+];
 
 /**
- * BAMBOOZLE is an *anti*-powerup (inverts your controls). Per the source
- * design it is never the first book spawned in a match, so a new player is
- * not immediately punished by mystery controls.
+ * Anti-powerups (BAMBOOZLE inverts controls; WEAKARM halves throw range) are
+ * never the first book spawned in a match, so a new player isn't immediately
+ * punished by a mystery downgrade.
  */
-export const NEVER_FIRST: PowerKey[] = ['BAMBOOZLE'];
+export const NEVER_FIRST: PowerKey[] = ['BAMBOOZLE', 'WEAKARM'];

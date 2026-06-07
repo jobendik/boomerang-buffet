@@ -5,7 +5,7 @@ import { BOUNDS } from '../constants';
 import { OBSTACLES } from '../data/arena';
 import { drawBoomShape } from '../gfx/shapes';
 import { circleRect, resolvePortals } from '../systems/collision';
-import { spawnExplosion } from '../systems/effects';
+import { spawnExplosion, spawnRing } from '../systems/effects';
 import { game } from '../game/state';
 import { FirePatch } from './FirePatch';
 import type { Player } from './Player';
@@ -252,18 +252,39 @@ export class Boomerang {
     audio.bomb();
     game.shake = Math.max(game.shake, 16);
     spawnExplosion(this.x, this.y);
-    const R = 78;
+
+    // Elemental stacking (Fire/Ice are exclusive, so at most one applies):
+    //  · Ice + Bomb  → a wider blast that FREEZES caught fighters, not kills
+    //  · Fire + Bomb → a caging ring of lingering fire around the perimeter
+    const icy = this.ice;
+    const R = icy ? 112 : 78;
+    if (icy) spawnRing(this.x, this.y, '#bdf0ff', 2.0);
+
     for (const p of game.players) {
       if (!p.alive || p.invuln > 0) continue;
       const self = p === this.origOwner;
       // a blast hits enemies and the careless thrower, but spares teammates
       if (!self && !this.origOwner.isEnemy(p)) continue;
       if (dist(this.x, this.y, p.x, p.y) < R + p.r) {
-        const [dx, dy] = norm(p.x - this.x, p.y - this.y);
-        p.die(this.origOwner, dx, dy);
-        if (self) this.origOwner.stats.bombSelfKills++; // "Short Fuse"
+        if (icy) {
+          if (!self) p.freeze(); // a freeze-bomb is crowd control, not a self-kill
+        } else {
+          const [dx, dy] = norm(p.x - this.x, p.y - this.y);
+          p.die(this.origOwner, dx, dy);
+          if (self) this.origOwner.stats.bombSelfKills++; // "Short Fuse"
+        }
       }
     }
+
+    // Fire + Bomb: ring the blast in persistent fire patches
+    if (this.fire) {
+      const ringR = 64;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * TAU;
+        game.hazards.push(new FirePatch(this.x + Math.cos(a) * ringR, this.y + Math.sin(a) * ringR, this.origOwner));
+      }
+    }
+
     if (this.isMain) this.origOwner.loseBoomerang();
   }
 
@@ -304,11 +325,13 @@ export class Boomerang {
       ctx.fill();
     }
     if (this.bomb) {
-      ctx.fillStyle = '#2a2030';
+      // an ice-bomb reads cold blue; a plain/fire bomb reads charcoal + spark
+      ctx.fillStyle = this.ice ? '#1d3a4a' : '#2a2030';
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.hitR + 2, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = Math.floor(game.time * 12) % 2 ? '#ffd23a' : '#ff7b3a';
+      const blink = Math.floor(game.time * 12) % 2;
+      ctx.fillStyle = this.ice ? (blink ? '#dff6ff' : '#7ad0ff') : blink ? '#ffd23a' : '#ff7b3a';
       ctx.beginPath();
       ctx.arc(this.x, this.y, 4, 0, TAU);
       ctx.fill();

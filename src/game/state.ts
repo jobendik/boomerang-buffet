@@ -3,7 +3,11 @@ import type { Boomerang } from '../entities/Boomerang';
 import type { Pickup } from '../entities/Pickup';
 import type { Particle } from '../entities/Particle';
 import type { FirePatch } from '../entities/FirePatch';
+import type { IcePatch } from '../entities/IcePatch';
 import type { Crusher } from '../entities/Crusher';
+
+/** Anything in `game.hazards`: a self-updating, self-drawing ground hazard. */
+export type Hazard = FirePatch | IcePatch;
 
 /**
  * The single mutable game-state container. Kept dependency-light (type-only
@@ -26,7 +30,7 @@ export interface GameState {
   boomerangs: Boomerang[];
   pickups: Pickup[];
   particles: Particle[];
-  hazards: FirePatch[];
+  hazards: Hazard[];
   crushers: Crusher[];
   raining: boolean; // weather: douses fire on contact (pit-free maps only)
   time: number;

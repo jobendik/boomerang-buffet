@@ -4,7 +4,7 @@ import { clamp, dist, lerp, norm, rand, TAU } from '../core/math';
 import { BOUNDS, SLASH_RANGE, SLASH_HALF } from '../constants';
 import { CHARS } from '../data/characters';
 import { SPAWNS } from '../data/arena';
-import { POWERS, ELEMENTAL_EXCLUSIVE, type PowerKey } from '../data/powers';
+import { POWERS, EXCLUSIVE_GROUPS, type PowerKey } from '../data/powers';
 import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
 import { resolveCircleObstacles, resolveCrushers, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
 import { spawnDashPuff, spawnExplosion, spawnRing, spawnSlice } from '../systems/effects';
@@ -12,6 +12,7 @@ import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
 import { Particle } from './Particle';
 import { FirePatch } from './FirePatch';
+import { IcePatch } from './IcePatch';
 import type { Char, Intents, Spawn, Vec2 } from '../types';
 
 /* ----------------------------- tuning constants -------------------------- */
@@ -84,6 +85,8 @@ export class Player {
   slashT!: number;
   slashCd!: number;
   frozen!: number;
+  chilled!: number; // remaining seconds of COOL WALK slow
+  chillBuild!: number; // cumulative chill exposure; freezes solid at the cap
   burning!: number; // remaining seconds before the burn turns lethal
   burnSource!: Player | null; // who gets credit if the burn kills us
   bamboozled!: number; // remaining seconds of inverted controls
@@ -155,6 +158,8 @@ export class Player {
     this.slashT = 0;
     this.slashCd = 0;
     this.frozen = 0;
+    this.chilled = 0;
+    this.chillBuild = 0;
     this.burning = 0;
     this.burnSource = null;
     this.bamboozled = 0;
@@ -209,9 +214,10 @@ export class Player {
       this.bamboozled = Math.max(this.bamboozled, 9);
       return;
     }
-    // Fire / Ice are mutually exclusive — taking one drops the other.
-    if (ELEMENTAL_EXCLUSIVE.includes(type)) {
-      for (const e of ELEMENTAL_EXCLUSIVE) if (e !== type) this.powers.delete(e);
+    // Honour mutually-exclusive groups (Fire/Ice, Hot Feet/Cool Walk): taking
+    // one member drops the others in its group.
+    for (const grp of EXCLUSIVE_GROUPS) {
+      if (grp.includes(type)) for (const e of grp) if (e !== type) this.powers.delete(e);
     }
     this.powers.add(type);
     if (type === 'EXTRA') {
@@ -244,6 +250,19 @@ export class Player {
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
     if (this.frozen > 0) this.frozen = Math.max(0, this.frozen - dt);
 
+    // COOL WALK chill: each step on ice slows you and stacks toward a freeze;
+    // step off and the chill thaws away.
+    if (this.chilled > 0) {
+      this.chilled = Math.max(0, this.chilled - dt);
+      this.chillBuild += dt;
+      if (this.chillBuild >= 1.5) {
+        this.chillBuild = 0;
+        this.freeze();
+      }
+    } else if (this.chillBuild > 0) {
+      this.chillBuild = Math.max(0, this.chillBuild - dt * 0.8);
+    }
+
     // inverted-controls affliction (telemetry feeds the Drunken/Bamboozled awards)
     if (this.bamboozled > 0) {
       this.bamboozled = Math.max(0, this.bamboozled - dt);
@@ -265,6 +284,9 @@ export class Player {
         );
       }
       if (this.burning <= 0) {
+        // Burning/Frozen paradox: freezing never clears the burn underneath, so
+        // a frozen-and-burning fighter still dies here when the burn elapses —
+        // and the ice block shatters with them (FX handled in `die`).
         const src = this.burnSource;
         if (src && src !== this) src.stats.burnKills++;
         const dir: Vec2 = [rand(-1, 1), rand(-1, 1)];
@@ -301,6 +323,7 @@ export class Player {
     let speedMul = 1;
     if (caffeinated) speedMul = 1.45;
     if (this.charging) speedMul *= 0.55;
+    if (this.chilled > 0) speedMul *= 0.5; // slogging through ice
     if (this.isGoldCarrier) speedMul *= 0.85; // hauling the artifact slows you
     const baseSpeed = 235 * speedMul;
     if (frozen) intents.move = [0, 0];
@@ -361,12 +384,13 @@ export class Player {
       audio.dash();
     }
 
-    // HOT FEET: scorch a fiery trail while moving at speed
-    if (this.powers.has('HOTFEET') && !frozen) {
+    // HOT FEET / COOL WALK: lay an elemental trail while moving at speed
+    if ((this.powers.has('HOTFEET') || this.powers.has('COOLWALK')) && !frozen) {
       this.trailT -= dt;
       if (this.trailT <= 0 && Math.hypot(this.vx, this.vy) > 120) {
         this.trailT = 0.1;
-        game.hazards.push(new FirePatch(this.x, this.y, this));
+        if (this.powers.has('HOTFEET')) game.hazards.push(new FirePatch(this.x, this.y, this));
+        else game.hazards.push(new IcePatch(this.x, this.y, this));
       }
     }
 
@@ -529,7 +553,8 @@ export class Player {
     charge = clamp(charge, 0.12, 1);
     const [ax, ay] = this.aim;
     const speed = 430 + charge * 230;
-    const outTime = 0.42 + charge * 0.4;
+    // WEAK ARM (anti-power): the boomerang turns back at half the usual range.
+    const outTime = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
     const curve = charge * MAX_CURVE; // longer hold => stronger banking curve
     const main = new Boomerang(this, ax * speed, ay * speed, outTime, true);
     main.curve = curve;
@@ -567,6 +592,12 @@ export class Player {
     this.frozen = Math.max(this.frozen, 1.7);
     audio.freeze();
     spawnRing(this.x, this.y, '#bdf0ff', 1.1);
+  }
+
+  /** Chilled by a COOL WALK ice trail: slowed now, frozen if you linger. */
+  chill(): void {
+    if (!this.alive || this.invuln > 0 || this.frozen > 0) return;
+    this.chilled = Math.max(this.chilled, 0.4);
   }
 
   /** Plunge into a bottomless pit — a self-elimination, no kill credited. */
@@ -624,6 +655,7 @@ export class Player {
     this.frozen = 0;
     audio.slice();
     spawnSlice(this.x, this.y, this.char, dirx, diry);
+    if (wasFrozen) spawnRing(this.x, this.y, '#bdf0ff', 1.3); // the ice block shatters
     game.shake = Math.max(game.shake, 14);
     game.hitstop = Math.max(game.hitstop, 0.09);
 
@@ -747,6 +779,17 @@ export class Player {
         ctx.globalAlpha = 0.6 + 0.4 * Math.sin(a);
         ctx.fillText('?', Math.cos(a) * (this.r + 6), -this.r - 6 + Math.sin(a) * 3);
       }
+      ctx.restore();
+    }
+    // chilled shimmer (slowed, building toward a freeze)
+    if (this.chilled > 0 && this.frozen <= 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = '#bdf0ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r + 3, 0, TAU);
+      ctx.stroke();
       ctx.restore();
     }
     // frozen overlay
