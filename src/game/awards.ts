@@ -110,6 +110,12 @@ const DEFS: AwardDef[] = [
     threshold: 500,
     detail: (v) => Math.round(v / 100) + 'm on the move',
   },
+  {
+    title: 'Switcheroo',
+    value: (p) => p.stats.switches,
+    threshold: 8,
+    detail: (v) => v + ' switches flipped',
+  },
 ];
 
 export function computeAwards(): Award[] {

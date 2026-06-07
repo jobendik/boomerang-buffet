@@ -76,9 +76,10 @@ Unstoppable/Hot Feet/Telekinesis/Bamboozle/**Disguise**/**Cool Walk**/
 brittle Frozen (mash-to-break) · soft player collision · Warp squash-kill ·
 3 arenas + random · bottomless pits + teleporters · **bushes (stealth cover)** ·
 **crushers (squish-kill)** · **rain (douses fire)** ·
-**Fall-Protection (Off/Gentle/Extreme)** · 9 fighters · modes: FFA / Team Up /
-Golden Boomerang / **Hide & Seek** · economy decay · 15 match awards (incl.
-**Rambo**, **Trash Compactor**, **Vengeful Ghost**, **Most Enthusiastic**).
+**Fall-Protection (Off/Gentle/Extreme)** · **floor switches + gates** · 9
+fighters · modes: FFA / Team Up / Golden Boomerang / **Hide & Seek** · economy
+decay · 16 match awards (incl. **Rambo**, **Trash Compactor**,
+**Vengeful Ghost**, **Most Enthusiastic**, **Switcheroo**).
 
 ---
 
@@ -187,8 +188,16 @@ These slot into the existing power architecture cleanly (`powers.ts` +
   music/ambience synths.
 - **More awards** — Vengeful Ghost ✅ (kills landed after the owner's death,
   `stats.ghostKills` credited in `die`), Most Enthusiastic ✅ (distance
-  travelled, `stats.distance`), Trash Compactor ✅ (with crushers). Still
-  remaining: Switcheroo (needs floor switches — a new arena mechanic).
+  travelled, `stats.distance`), Trash Compactor ✅ (with crushers),
+  Switcheroo ✅ (`stats.switches`, via the new floor-switch mechanic below).
+- **Floor switches + gates** ✅ DONE — `SwitchDef`/`GateDef` on the `Arena` type
+  + data (live bindings `SWITCHES`/`GATES`); runtime `game.switches`/`game.gates`
+  (built in `startRound` like crushers). A fighter standing on a plate opens its
+  linked gate (`updateSwitches` in `collision.ts`, stepped each frame in
+  `update.ts`); gates are solid for players (`resolveGates`, Phase-Dash passes
+  through) and bounce boomerangs (closed gates folded into the obstacle loop).
+  Bots treat closed gates as line-of-sight blockers (`ai.ts`). Drawn as lit
+  plates + retracting bars in `ui/arena.ts`. Showcased in Diner & Crossfire.
 - **Portals/teleporters** could gain the source's velocity-perfect feel + FX.
 
 ---
@@ -210,8 +219,8 @@ Fall-Protection), the Disguise/Cool Walk/Weak Arm powers, the elemental stacking
 matrix, the remaining P2 powers (**Decoy / Delayed Death / Phase Dash**) and
 **Multi + Bomb** are ✅ done. Remaining, easiest first:
 
-1. **More awards** (P3) — Vengeful Ghost ✅ and Most Enthusiastic ✅ done.
-   Switcheroo still needs floor switches first (a new arena mechanic).
+1. **More awards** (P3) — Vengeful Ghost ✅, Most Enthusiastic ✅ and
+   Switcheroo ✅ (+ its floor-switch mechanic) all done.
 2. **More content** (P3) — toward 12 characters and biome-varied arenas;
    per-arena music/ambience synths.
 3. **Battle Royale** power + **vertical dodge/jump** (P3, larger systems).

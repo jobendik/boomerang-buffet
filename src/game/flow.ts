@@ -1,7 +1,7 @@
 import { audio } from '../core/audio';
 import { dist, rand, randi } from '../core/math';
 import { BOUNDS } from '../constants';
-import { ARENAS, OBSTACLES, PITS, SPAWNS, CRUSHERS, setArena } from '../data/arena';
+import { ARENAS, OBSTACLES, PITS, SPAWNS, CRUSHERS, SWITCHES, GATES, setArena } from '../data/arena';
 import { POWER_KEYS, NEVER_FIRST } from '../data/powers';
 import { CHARS } from '../data/characters';
 import { Player } from '../entities/Player';
@@ -51,6 +51,9 @@ export function startRound(): void {
   game.hazards = [];
   game.decoys = [];
   game.crushers = CRUSHERS.map((d) => new Crusher(d));
+  // fresh floor-switch / gate runtime for this arena (gates start closed)
+  game.switches = SWITCHES.map((s) => ({ x: s.x, y: s.y, r: s.r, gate: s.gate, pressed: false, on: [] }));
+  game.gates = GATES.map((g) => ({ x: g.x, y: g.y, w: g.w, h: g.h, open: false }));
   // Weather: a 5% chance of rain, but only on maps with no bottomless pits
   // (slick footing + a yawning void would be a touch too cruel).
   game.raining = PITS.length === 0 && Math.random() < 0.05;

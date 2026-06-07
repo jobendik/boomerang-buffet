@@ -56,6 +56,23 @@ export interface Portal {
   r: number;
 }
 
+/** A floor switch: standing on it opens the gate at index `gate` in `gates`. */
+export interface SwitchDef {
+  x: number;
+  y: number;
+  r: number;
+  gate: number; // index into the arena's `gates` array
+}
+
+/** A gate: a solid block (like an obstacle) that retracts while its linked
+ *  switch is pressed, opening a passage. */
+export interface GateDef {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** A selectable arena: geometry, spawns, hazards and a colour theme. */
 export interface Arena {
   name: string;
@@ -65,6 +82,8 @@ export interface Arena {
   bushes: Rect[]; // leafy cover: hides a fighter from bots, feeds "Rambo"
   crushers: CrusherDef[]; // kinematic blocks that squish the careless
   portals: Portal[];
+  switches: SwitchDef[]; // floor plates that open gates while pressed
+  gates: GateDef[]; // solid blocks that retract when their switch is pressed
   floorA: string;
   floorB: string;
   accent: string;

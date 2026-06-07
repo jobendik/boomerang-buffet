@@ -31,6 +31,25 @@ export interface Decoy {
 /** Anything in `game.hazards`: a self-updating, self-drawing ground hazard. */
 export type Hazard = FirePatch | IcePatch;
 
+/** Live floor-switch state: which fighters stand on it and whether it's pressed. */
+export interface SwitchState {
+  x: number;
+  y: number;
+  r: number;
+  gate: number;
+  pressed: boolean;
+  on: number[]; // idxs of fighters currently standing on it (for rising-edge credit)
+}
+
+/** Live gate state: a solid block that's open (retracted) while pressed. */
+export interface GateState {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  open: boolean;
+}
+
 /**
  * The single mutable game-state container. Kept dependency-light (type-only
  * imports) so it can be imported everywhere without creating runtime cycles.
@@ -55,6 +74,8 @@ export interface GameState {
   hazards: Hazard[];
   crushers: Crusher[];
   decoys: Decoy[]; // DECOY clones currently fooling the bots
+  switches: SwitchState[]; // live floor switches for the current arena
+  gates: GateState[]; // live gates, opened by their switches
   raining: boolean; // weather: douses fire on contact (pit-free maps only)
   time: number;
   shake: number;
@@ -91,6 +112,8 @@ export const game: GameState = {
   hazards: [],
   crushers: [],
   decoys: [],
+  switches: [],
+  gates: [],
   raining: false,
   time: 0,
   shake: 0,
