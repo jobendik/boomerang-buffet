@@ -87,6 +87,28 @@ function drawDecoy(d: Decoy): void {
   }
 }
 
+/** Battle Royale: a lethal red wash outside the closing safe circle. */
+function drawBattleRoyale(): void {
+  const br = game.br;
+  if (!br) return;
+  const r = Math.max(0, br.r);
+  ctx.save();
+  // fill everything OUTSIDE the safe circle (rect + reversed arc, even-odd)
+  ctx.fillStyle = 'rgba(255,40,60,.15)';
+  ctx.beginPath();
+  ctx.rect(WALL, WALL, W - WALL * 2, H - WALL * 2);
+  ctx.arc(br.cx, br.cy, r, 0, TAU, true);
+  ctx.fill('evenodd');
+  // the closing boundary ring, pulsing
+  const pulse = 0.55 + 0.4 * Math.sin(game.time * 6);
+  ctx.strokeStyle = `rgba(255,93,108,${pulse})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(br.cx, br.cy, r, 0, TAU);
+  ctx.stroke();
+  ctx.restore();
+}
+
 /** Draws the live play-field: arena + all entities, depth-sorted by y. */
 export function drawWorld(): void {
   drawArena();
@@ -118,6 +140,8 @@ export function drawWorld(): void {
   for (const b of game.boomerangs) b.draw();
   // particles
   for (const p of game.particles) p.draw();
+  // Battle Royale boundary overlay sits above the field
+  if (game.br) drawBattleRoyale();
   // weather overlay last, over the whole field
   if (game.raining) drawRain();
 }

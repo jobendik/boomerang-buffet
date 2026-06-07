@@ -78,7 +78,7 @@ brittle Frozen (mash-to-break) · soft player collision · Warp squash-kill ·
 **bushes (stealth cover)** ·
 **crushers (squish-kill)** · **rain (douses fire)** ·
 **Fall-Protection (Off/Gentle/Extreme)** · **floor switches + gates** · **12
-fighters** · modes: FFA / Team Up / Golden Boomerang / **Hide & Seek** · economy
+fighters** · modes: FFA / Team Up / Golden Boomerang / **Hide & Seek** · **Battle Royale** event · economy
 decay · 16 match awards (incl. **Rambo**, **Trash Compactor**,
 **Vengeful Ghost**, **Most Enthusiastic**, **Switcheroo**).
 
@@ -159,8 +159,14 @@ These slot into the existing power architecture cleanly (`powers.ts` +
 - **Dash-Through-Walls** ✅ DONE — the `PHASE` power skips the solid obstacle
   layer for the duration of a dash (`resolveCircleObstacles` gated in `update`);
   map bounds & crushers still stop you.
-- **Battle Royale** — shrinking lethal border toward the collection point
-  (needs a dynamic-bounds system; larger).
+- **Battle Royale** ✅ DONE — grabbing the book triggers a level-wide event
+  (`game.br`, handled specially in `applyPower` like BAMBOOZLE, not a kept
+  modifier): a safe circle centred on the grab point shrinks over ~8.5s
+  (`updateBattleRoyale` in `update.ts`), purging any fighter *hostile to the
+  initiator* caught outside (credited to them, Team-Up-safe; the initiator &
+  allies are immune). Red wash + closing ring drawn in `ui/world.ts`; bots
+  hostile to the initiator sprint for the centre (`ai.ts`). Barred from being
+  the first book (`NEVER_FIRST`); auto-ends after ~13s / on round reset.
 - **Stacking matrix** (blueprint "Complex Systemic Interactions"):
   - Ice + Explosive → blast **freezes** in a larger radius instead of killing.
     ✅ DONE (`Boomerang.explode`, R 112, freeze not kill).
@@ -225,6 +231,7 @@ matrix, the remaining P2 powers (**Decoy / Delayed Death / Phase Dash**) and
    Switcheroo ✅ (+ its floor-switch mechanic) all done.
 2. **More content** (P3) — 12 fighters ✅ + the Grove arena ✅ done. Remaining:
    per-arena music/ambience synths, and yet more arenas if desired.
-3. **Battle Royale** power + **vertical dodge/jump** (P3, larger systems).
+3. **Battle Royale** power ✅ done. Remaining larger system: **vertical
+   dodge/jump** (a jump state that lifts you out of the collision radius).
 
 Branch per feature, `npm run build` gate, keep `isEnemy`/telemetry conventions.

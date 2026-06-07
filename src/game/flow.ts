@@ -62,6 +62,7 @@ export function startRound(): void {
     p.reset(SPAWNS[spawnsOrder[i]]);
     p.invuln = 0.8;
   });
+  game.br = null; // any Battle Royale event ends with the round
   // Golden Boomerang resets to centre each round; carried time is cumulative
   if (game.mode === 2) {
     game.golden = { x: (BOUNDS.l + BOUNDS.r) / 2, y: (BOUNDS.t + BOUNDS.b) / 2, carrier: null, bob: 0 };

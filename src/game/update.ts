@@ -1,13 +1,45 @@
 import { audio } from '../core/audio';
-import { dist, norm, rand } from '../core/math';
+import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse } from '../core/input';
 import { aiThink } from '../systems/ai';
 import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
 import { spawnRing } from '../systems/effects';
+import { POWERS } from '../data/powers';
+import { Particle } from '../entities/Particle';
 import { game } from './state';
 import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
 import type { Intents } from '../types';
 import type { Player } from '../entities/Player';
+
+/** Battle Royale: shrink the safe circle and purge hostiles caught outside. */
+function updateBattleRoyale(dt: number): void {
+  const br = game.br;
+  if (!br) return;
+  br.t += dt;
+  // ease the radius from rStart down to rMin over `shrink` seconds, then hold
+  const k = Math.min(1, br.t / br.shrink);
+  br.r = lerp(br.rStart, br.rMin, k);
+  // anyone hostile to the initiator left outside the ring is eliminated
+  // (environmental: credits the initiator but bypasses the Delayed-Death stay)
+  for (const p of game.players) {
+    if (!p.alive || p.invuln > 0 || !br.initiator.isEnemy(p)) continue;
+    if (dist(p.x, p.y, br.cx, br.cy) > br.r + p.r) {
+      const [dx, dy] = norm(p.x - br.cx, p.y - br.cy);
+      p.die(br.initiator, dx, dy, true);
+    }
+  }
+  // embers licking along the closing boundary (only once the ring is on-screen)
+  if (br.r < 720 && Math.random() < 0.7) {
+    const a = rand(0, TAU);
+    game.particles.push(
+      new Particle(br.cx + Math.cos(a) * br.r, br.cy + Math.sin(a) * br.r, rand(-10, 10), rand(-30, -6), rand(0.3, 0.6), Math.random() < 0.5 ? '#ff5d6c' : '#ffce54', rand(2, 4))
+    );
+  }
+  if (br.t >= br.dur) {
+    spawnRing(br.cx, br.cy, POWERS.BATTLE.color, 2.2);
+    game.br = null;
+  }
+}
 
 /** Golden Boomerang objective: pick-up-by-touch, accumulate hold time, win. */
 function updateGolden(dt: number): void {
@@ -114,6 +146,7 @@ export function update(dt: number): void {
     for (const c of game.crushers) c.update(dt); // move blocks + squish the pinned
     spreadFire(); // burning fighters ignite their neighbours
     updateGolden(dt); // Golden Boomerang carry/score (no-op in other modes)
+    updateBattleRoyale(dt); // shrinking lethal border (no-op unless triggered)
     // boomerangs
     for (const b of game.boomerangs) b.update(dt);
     resolveBoomerangHits();

@@ -29,6 +29,7 @@ export const POWERS: Record<string, Power> = {
   DECOY: { name: 'Decoy', color: '#7ad0ff', icon: '⧉' },
   DELAYED: { name: 'Delayed Death', color: '#c9b8ff', icon: '⌛' },
   PHASE: { name: 'Phase Dash', color: '#b6f0ff', icon: '⇶' },
+  BATTLE: { name: 'Battle Royale', color: '#ff5d6c', icon: '◎' },
 };
 
 export type PowerKey = keyof typeof POWERS;
@@ -48,6 +49,7 @@ export const EXCLUSIVE_GROUPS: PowerKey[][] = [
 /**
  * Anti-powerups (BAMBOOZLE inverts controls; WEAKARM halves throw range) are
  * never the first book spawned in a match, so a new player isn't immediately
- * punished by a mystery downgrade.
+ * punished by a mystery downgrade. BATTLE (Battle Royale) is held back too —
+ * it's a match-warping global event, not something to drop on an empty arena.
  */
-export const NEVER_FIRST: PowerKey[] = ['BAMBOOZLE', 'WEAKARM'];
+export const NEVER_FIRST: PowerKey[] = ['BAMBOOZLE', 'WEAKARM', 'BATTLE'];

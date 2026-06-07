@@ -235,6 +235,17 @@ export function aiThink(p: Player, dt: number): Intents {
     }
   }
 
+  // Battle Royale: a hostile fighter near/outside the closing ring sprints for
+  // the safe centre (the initiator & allies are immune, so they need not flee)
+  if (game.br && game.br.initiator.isEnemy(p)) {
+    const d = dist(p.x, p.y, game.br.cx, game.br.cy);
+    if (d > game.br.r - 90) {
+      const [ix, iy] = norm(game.br.cx - p.x, game.br.cy - p.y);
+      mvx += ix * 2.8;
+      mvy += iy * 2.8;
+    }
+  }
+
   // frozen solid: mash dash to crack free (bots, unlike fire, do fight the ice).
   // NB: deliberately no fire-extinguish here — clustered bots cascade-burn,
   // exactly the exploitable flaw the source AI is known for.
