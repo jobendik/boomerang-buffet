@@ -20,6 +20,8 @@ const SLASH_ACTIVE = 0.12; // seconds the blade is "live"
 const SLASH_CD = 0.42; // base melee cooldown
 const SLASH_CD_FAST = 0.24; // with EXTRA (dual-wield)
 const MAX_CURVE = 5.2; // rad/s angular velocity at full charge
+const BASE_CURVE = 1.15; // rad/s baseline bank on even an uncharged throw — every
+//                          flight arcs out and loops back, the boomerang's signature
 const RESPAWN_TIME = 1.2; // delay before a lost boomerang returns to hand
 const JUMP_TIME = 0.5; // seconds airborne per hop
 const JUMP_H = 30; // peak visual height of a hop
@@ -671,7 +673,7 @@ export class Player {
     const speed = 430 + charge * 230;
     // WEAK ARM (anti-power): the boomerang turns back at half the usual range.
     const outTime = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
-    const curve = charge * MAX_CURVE; // longer hold => stronger banking curve
+    const curve = BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE); // longer hold => tighter loop
     const main = new Boomerang(this, ax * speed, ay * speed, outTime, true);
     main.curve = curve;
     // The Golden Boomerang carrier's modifiers are suspended — a plain throw only.
@@ -702,6 +704,7 @@ export class Player {
     this.boomsInHand = Math.min(this.boomsMax, this.boomsInHand + 1);
     audio.catch_();
     spawnRing(this.x, this.y, this.char.body, 0.9);
+    game.shake = Math.max(game.shake, 3); // a satisfying little thunk on the catch
   }
 
   freeze(): void {

@@ -42,6 +42,7 @@ export class Boomerang {
   fireT: number;
   bounceFlash: number;
   portalCd: number;
+  trail: number[][]; // recent positions for the motion-blur streak
 
   constructor(owner: Player, vx: number, vy: number, outTime: number, isMain: boolean) {
     this.owner = owner;
@@ -70,6 +71,7 @@ export class Boomerang {
     this.fireT = 0;
     this.bounceFlash = 0;
     this.portalCd = 0;
+    this.trail = [];
   }
 
   get hitR(): number {
@@ -77,8 +79,11 @@ export class Boomerang {
   }
 
   update(dt: number): void {
-    this.rot += dt * 26;
+    this.rot += dt * 18; // a brisk tumble — fast enough to read as "spinning", slow enough to see the wing
     this.bounceFlash = Math.max(0, this.bounceFlash - dt);
+    // record a short position history for the motion-blur streak
+    this.trail.push([this.x, this.y]);
+    if (this.trail.length > 7) this.trail.shift();
     if (this.transient) {
       this.life -= dt;
       if (this.life <= 0) {
@@ -348,6 +353,17 @@ export class Boomerang {
     }
     const s = this.big ? 16 : this.transient ? 9 : 11;
     const col = this.bounceFlash > 0 ? '#fff' : this.origOwner.char.body;
-    drawBoomShape(this.x, this.y, s, this.rot, col);
+    // motion-blur streak: fading coloured pucks along the recent flight path
+    for (let i = 0; i < this.trail.length - 1; i++) {
+      const [tx, ty] = this.trail[i];
+      const a = (i + 1) / this.trail.length;
+      ctx.globalAlpha = a * 0.28;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(tx, ty, s * 0.5 * a, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    drawBoomShape(this.x, this.y, s, this.rot, col, true);
   }
 }

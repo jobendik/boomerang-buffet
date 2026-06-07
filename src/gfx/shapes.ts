@@ -76,22 +76,45 @@ export function drawProp(idx: number, r: number): void {
   }
 }
 
-/** Draw a spinning boomerang glyph at (x, y). */
-export function drawBoomShape(x: number, y: number, s: number, rot: number, color: string): void {
+/**
+ * Draw a spinning boomerang glyph at (x, y): a classic two-armed bent wing
+ * (a thick rounded chevron), built by stroking the same V three times — a dark
+ * outline, the body colour, then a centre highlight — so it reads as a rounded
+ * arm rather than a flat shape. `glow` adds a coloured bloom for an in-flight
+ * boomerang. `s` is the arm reach (the wing spans ~2·s).
+ */
+export function drawBoomShape(x: number, y: number, s: number, rot: number, color: string, glow = false): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(-s, -s);
-  ctx.quadraticCurveTo(0, -s * 0.2, s, -s);
-  ctx.quadraticCurveTo(s * 0.2, 0, s, s);
-  ctx.quadraticCurveTo(0, s * 0.2, -s, s);
-  ctx.quadraticCurveTo(-s * 0.2, 0, -s, -s);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.25)';
-  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // the bent-wing path: two arms meeting at a rounded elbow (~90° spread)
+  const path = (): void => {
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.95, -s * 0.42);
+    ctx.lineTo(0, s * 0.52);
+    ctx.lineTo(s * 0.95, -s * 0.42);
+  };
+  // dark outline for definition against the floor
+  ctx.strokeStyle = 'rgba(0,0,0,.32)';
+  ctx.lineWidth = s * 0.88;
+  path();
+  ctx.stroke();
+  // coloured body (with an optional in-flight bloom)
+  if (glow) {
+    ctx.shadowBlur = s;
+    ctx.shadowColor = color;
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = s * 0.72;
+  path();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  // centre highlight runs down each arm — sells the rounded, tumbling form
+  ctx.strokeStyle = 'rgba(255,255,255,.32)';
+  ctx.lineWidth = s * 0.22;
+  path();
   ctx.stroke();
   ctx.restore();
 }
