@@ -49,6 +49,7 @@ export function startRound(): void {
   game.pickups = [];
   game.particles = [];
   game.hazards = [];
+  game.decoys = [];
   game.crushers = CRUSHERS.map((d) => new Crusher(d));
   // Weather: a 5% chance of rain, but only on maps with no bottomless pits
   // (slick footing + a yawning void would be a touch too cruel).

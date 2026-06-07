@@ -5,6 +5,28 @@ import type { Particle } from '../entities/Particle';
 import type { FirePatch } from '../entities/FirePatch';
 import type { IcePatch } from '../entities/IcePatch';
 import type { Crusher } from '../entities/Crusher';
+import type { Vec2 } from '../types';
+
+/**
+ * A DECOY clone — a short-lived, inert look-alike spawned when a fighter with
+ * the Decoy power dashes. It mimics their character, aim and boomerang count so
+ * bots are drawn to attack the phantom (see `ai.ts` targeting) while the real
+ * fighter slips away.
+ */
+export interface Decoy {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  charIdx: number;
+  aim: Vec2;
+  booms: number;
+  team: number; // copied from the owner so bots resolve friend/foe correctly
+  ownerIdx: number;
+  life: number;
+  ttl: number;
+  bob: number;
+}
 
 /** Anything in `game.hazards`: a self-updating, self-drawing ground hazard. */
 export type Hazard = FirePatch | IcePatch;
@@ -32,6 +54,7 @@ export interface GameState {
   particles: Particle[];
   hazards: Hazard[];
   crushers: Crusher[];
+  decoys: Decoy[]; // DECOY clones currently fooling the bots
   raining: boolean; // weather: douses fire on contact (pit-free maps only)
   time: number;
   shake: number;
@@ -67,6 +90,7 @@ export const game: GameState = {
   particles: [],
   hazards: [],
   crushers: [],
+  decoys: [],
   raining: false,
   time: 0,
   shake: 0,

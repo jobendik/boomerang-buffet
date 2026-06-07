@@ -98,6 +98,18 @@ const DEFS: AwardDef[] = [
     threshold: 1,
     detail: (v) => 'squished ' + v + (v === 1 ? ' time' : ' times'),
   },
+  {
+    title: 'Vengeful Ghost',
+    value: (p) => p.stats.ghostKills,
+    threshold: 1,
+    detail: (v) => v + ' kills from beyond the grave',
+  },
+  {
+    title: 'Most Enthusiastic',
+    value: (p) => p.stats.distance,
+    threshold: 500,
+    detail: (v) => Math.round(v / 100) + 'm on the move',
+  },
 ];
 
 export function computeAwards(): Award[] {

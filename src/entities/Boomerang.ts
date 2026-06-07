@@ -36,6 +36,7 @@ export class Boomerang {
   bomb: boolean;
   multi: boolean;
   unstoppable: boolean;
+  blastScale: number; // explosion radius multiplier (<1 for MULTI sub-bombs)
   tk: boolean; // TELEKINESIS — steered by the owner's aim while they hold throw
   dead: boolean;
   fireT: number;
@@ -63,6 +64,7 @@ export class Boomerang {
     this.bomb = false;
     this.multi = false;
     this.unstoppable = false;
+    this.blastScale = 1;
     this.tk = false;
     this.dead = false;
     this.fireT = 0;
@@ -80,7 +82,10 @@ export class Boomerang {
     if (this.transient) {
       this.life -= dt;
       if (this.life <= 0) {
-        this.kill(false);
+        // a MULTI sub-bomb detonates at the end of its short flight rather than
+        // fizzling out; a plain sub-projectile just expires
+        if (this.bomb) this.explode();
+        else this.kill(false);
         return;
       }
     }
@@ -239,6 +244,9 @@ export class Boomerang {
       ex.transient = true;
       ex.life = 0.6;
       ex.fire = this.fire; // sub-projectiles keep the fire trail (smaller footprint)
+      ex.ice = this.ice; // …and the elemental tag, so an ice-bomb fan still freezes
+      ex.bomb = this.bomb; // MULTI + BOMB: each splinter carries a scaled-down blast
+      ex.blastScale = this.bomb ? 0.62 : 1; // shrunk so the fan can't wipe the map
       ex.unstoppable = this.unstoppable; // an un-parryable fan stays un-parryable
       game.boomerangs.push(ex);
     }
@@ -257,8 +265,8 @@ export class Boomerang {
     //  · Ice + Bomb  → a wider blast that FREEZES caught fighters, not kills
     //  · Fire + Bomb → a caging ring of lingering fire around the perimeter
     const icy = this.ice;
-    const R = icy ? 112 : 78;
-    if (icy) spawnRing(this.x, this.y, '#bdf0ff', 2.0);
+    const R = (icy ? 112 : 78) * this.blastScale;
+    if (icy) spawnRing(this.x, this.y, '#bdf0ff', 2.0 * this.blastScale);
 
     for (const p of game.players) {
       if (!p.alive || p.invuln > 0) continue;
@@ -278,7 +286,7 @@ export class Boomerang {
 
     // Fire + Bomb: ring the blast in persistent fire patches
     if (this.fire) {
-      const ringR = 64;
+      const ringR = 64 * this.blastScale;
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * TAU;
         game.hazards.push(new FirePatch(this.x + Math.cos(a) * ringR, this.y + Math.sin(a) * ringR, this.origOwner));

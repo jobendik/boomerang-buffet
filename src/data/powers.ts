@@ -26,6 +26,9 @@ export const POWERS: Record<string, Power> = {
   DISGUISE: { name: 'Disguise', color: '#9bd17a', icon: '⌂' },
   COOLWALK: { name: 'Cool Walk', color: '#8fe6ff', icon: '❅' },
   WEAKARM: { name: 'Weak Arm', color: '#b0a0c0', icon: '↧' },
+  DECOY: { name: 'Decoy', color: '#7ad0ff', icon: '⧉' },
+  DELAYED: { name: 'Delayed Death', color: '#c9b8ff', icon: '⌛' },
+  PHASE: { name: 'Phase Dash', color: '#b6f0ff', icon: '⇶' },
 };
 
 export type PowerKey = keyof typeof POWERS;

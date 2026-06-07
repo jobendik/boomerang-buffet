@@ -2,7 +2,7 @@ import { audio } from '../core/audio';
 import { dist, norm, rand } from '../core/math';
 import { keys, mouse } from '../core/input';
 import { aiThink } from '../systems/ai';
-import { resolveBoomerangHits, resolvePlayerCollisions, resolveSlashes, spreadFire } from '../systems/collision';
+import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire } from '../systems/collision';
 import { spawnRing } from '../systems/effects';
 import { game } from './state';
 import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
@@ -118,6 +118,17 @@ export function update(dt: number): void {
     resolveBoomerangHits();
     resolveSlashes();
     if (seeker && seeker.stats.kills > seekerKillsBefore) seeker.attemptsLeft += seeker.stats.kills - seekerKillsBefore;
+    // DECOY clones: drift to a stop, age out, and pop when a foe's attack lands
+    for (const d of game.decoys) {
+      d.life -= dt;
+      d.bob += dt * 8;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.vx *= Math.pow(0.01, dt);
+      d.vy *= Math.pow(0.01, dt);
+    }
+    resolveDecoyHits();
+    game.decoys = game.decoys.filter((d) => d.life > 0);
     // hazards
     game.hazards = game.hazards.filter((h) => h.update(dt));
     // pickups

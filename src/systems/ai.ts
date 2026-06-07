@@ -65,6 +65,29 @@ export function aiThink(p: Player, dt: number): Intents {
     }
   }
 
+  // DECOY attraction: a nearer enemy clone hijacks the bot's attention, so it
+  // aims & throws at the phantom (the misdirection the power is bought for). It
+  // won't waste a melee on thin air, so close-quarters reverts to the real foe.
+  let tgX = best ? best.x : 0;
+  let tgY = best ? best.y : 0;
+  let tgVx = best ? best.vx : 0;
+  let tgVy = best ? best.vy : 0;
+  let tgDist = best ? Math.sqrt(bd) : Infinity;
+  let phantom = false;
+  for (const dec of game.decoys) {
+    if (dec.ownerIdx === p.idx) continue;
+    if (p.team >= 0 && dec.team >= 0 && p.team === dec.team) continue; // ally clone
+    const dd = dist(p.x, p.y, dec.x, dec.y);
+    if (dd < tgDist) {
+      tgDist = dd;
+      tgX = dec.x;
+      tgY = dec.y;
+      tgVx = 0;
+      tgVy = 0;
+      phantom = true;
+    }
+  }
+
   let mvx = 0;
   let mvy = 0;
   if (game.mode === 3 && p.role === 'hider') {
@@ -78,13 +101,13 @@ export function aiThink(p: Player, dt: number): Intents {
         mvy = away[1];
       }
     }
-  } else if (best) {
-    const d = Math.sqrt(bd);
-    const [tx, ty] = norm(best.x - p.x, best.y - p.y);
-    // aim with lead
+  } else if (best || phantom) {
+    const d = tgDist;
+    const [tx, ty] = norm(tgX - p.x, tgY - p.y);
+    // aim with lead (a decoy is stationary, so its lead terms are zero)
     const lead = 0.12;
-    const ax = best.x + best.vx * lead;
-    const ay = best.y + best.vy * lead;
+    const ax = tgX + tgVx * lead;
+    const ay = tgY + tgVy * lead;
     const aim = norm(ax - p.x, ay - p.y);
     intents.aimX = aim[0];
     intents.aimY = aim[1];
@@ -107,13 +130,14 @@ export function aiThink(p: Player, dt: number): Intents {
       mvy += tx * a.strafe * 0.9;
     }
 
-    // point-blank melee slash (faster than a throw, so prefer it up close)
-    if (p.armed && p.slashCd <= 0 && d < p.r + best.r + 30) {
+    // point-blank melee slash (faster than a throw, so prefer it up close) —
+    // only against a real foe; a phantom isn't worth a swing.
+    if (best && !phantom && p.armed && p.slashCd <= 0 && d < p.r + best.r + 30) {
       intents.slash = true;
     }
 
     // throw decision
-    if (p.hasBoomerang && a.tThrow <= 0 && d < 460 && !lineHitsObstacle(p.x, p.y, best.x, best.y)) {
+    if (p.hasBoomerang && a.tThrow <= 0 && d < 460 && !lineHitsObstacle(p.x, p.y, tgX, tgY)) {
       const facing = norm(intents.aimX, intents.aimY);
       const dot = facing[0] * tx + facing[1] * ty;
       if (dot > 0.6 || d < 200) {
