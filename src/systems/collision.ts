@@ -2,6 +2,7 @@ import { audio } from '../core/audio';
 import { clamp, dist, dist2, norm, TAU } from '../core/math';
 import { OBSTACLES, PITS, PORTALS, BUSHES } from '../data/arena';
 import { SLASH_RANGE, SLASH_HALF } from '../constants';
+import { POWERS } from '../data/powers';
 import { game } from '../game/state';
 import { spawnRing } from './effects';
 import type { CircleRectHit, Rect } from '../types';
@@ -192,6 +193,50 @@ export function resolveBoomerangHits(): void {
         } else {
           const [dx, dy] = norm(b.vx, b.vy);
           p.die(b.origOwner, dx, dy);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * DECOY clones pop the moment a foe's boomerang or slash makes contact —
+ * the satisfying "gotcha… nope" beat that sells the misdirection. Hitting a
+ * phantom costs the attacker their shot (the boom flies on / the swing whiffs)
+ * but deals no real damage. A clone's owner and teammates pass through it.
+ */
+export function resolveDecoyHits(): void {
+  if (!game.decoys.length) return;
+  const DR = 17; // clone collision radius (matches a fighter)
+  for (const d of game.decoys) {
+    if (d.life <= 0) continue;
+    // a boomerang from anyone hostile to the clone's owner pops it
+    for (const b of game.boomerangs) {
+      if (b.dead) continue;
+      const o = b.origOwner;
+      if (o.idx === d.ownerIdx || (o.team >= 0 && d.team >= 0 && o.team === d.team)) continue;
+      if (dist(b.x, b.y, d.x, d.y) < b.hitR + DR) {
+        d.life = 0;
+        break;
+      }
+    }
+    if (d.life <= 0) {
+      spawnRing(d.x, d.y, POWERS.DECOY.color, 1.1);
+      audio.tick();
+      continue;
+    }
+    // an enemy melee swing connecting with the clone also bursts it
+    for (const p of game.players) {
+      if (!p.alive || p.slashT <= 0) continue;
+      if (p.idx === d.ownerIdx || (p.team >= 0 && d.team >= 0 && p.team === d.team)) continue;
+      const reach = p.r + SLASH_RANGE;
+      if (dist(p.x, p.y, d.x, d.y) < reach + DR) {
+        const a = Math.atan2(p.aim[1], p.aim[0]);
+        if (angDiff(a, Math.atan2(d.y - p.y, d.x - p.x)) < SLASH_HALF) {
+          d.life = 0;
+          spawnRing(d.x, d.y, POWERS.DECOY.color, 1.1);
+          audio.tick();
+          break;
         }
       }
     }

@@ -2,6 +2,9 @@ import { ctx } from '../core/canvas';
 import { TAU } from '../core/math';
 import { W, H, WALL } from '../constants';
 import { game } from '../game/state';
+import type { Decoy } from '../game/state';
+import { CHARS } from '../data/characters';
+import { POWERS } from '../data/powers';
 import { drawBoomShape, drawProp } from '../gfx/shapes';
 import { drawArena } from './arena';
 
@@ -47,6 +50,43 @@ function drawGolden(): void {
   ctx.restore();
 }
 
+/** A DECOY clone: a near-perfect copy of its owner with a tell-tale shimmer. */
+function drawDecoy(d: Decoy): void {
+  const c = CHARS[d.charIdx];
+  const r = 17;
+  const fade = Math.min(1, d.life / 0.6); // fade out over the final 0.6s
+  const bobY = Math.sin(d.bob) * 1.8;
+  // shadow
+  ctx.save();
+  ctx.globalAlpha = 0.9 * fade;
+  ctx.fillStyle = 'rgba(0,0,0,.24)';
+  ctx.beginPath();
+  ctx.ellipse(d.x, d.y + r * 0.95, r * 0.9, r * 0.42, 0, 0, TAU);
+  ctx.fill();
+  ctx.translate(d.x, d.y + bobY);
+  // faint shimmer ring — the only giveaway it isn't the real fighter
+  ctx.globalAlpha = (0.16 + 0.12 * Math.sin(game.time * 7)) * fade;
+  ctx.strokeStyle = POWERS.DECOY.color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 6, 0, TAU);
+  ctx.stroke();
+  ctx.globalAlpha = 0.9 * fade;
+  c.draw(c, r, d.aim);
+  ctx.restore();
+  // boomerang-in-hand indicators, mirroring the owner's count
+  if (d.booms > 0) {
+    const a = Math.atan2(d.aim[1], d.aim[0]);
+    for (let i = 0; i < d.booms; i++) {
+      const off = (i - (d.booms - 1) / 2) * 0.5;
+      ctx.save();
+      ctx.globalAlpha = 0.9 * fade;
+      drawBoomShape(d.x + Math.cos(a + off) * (r + 9), d.y + bobY + Math.sin(a + off) * (r + 9), 7, game.time * 6, c.dark);
+      ctx.restore();
+    }
+  }
+}
+
 /** Draws the live play-field: arena + all entities, depth-sorted by y. */
 export function drawWorld(): void {
   drawArena();
@@ -64,9 +104,12 @@ export function drawWorld(): void {
   // pickups
   for (const pk of game.pickups) pk.draw();
   if (game.golden && !game.golden.carrier) drawGolden();
-  // players
-  const sorted = [...game.players].sort((a, b) => a.y - b.y);
-  for (const p of sorted) p.draw();
+  // players + DECOY clones, depth-sorted together so overlap reads correctly
+  const sorted = [...game.players.filter((p) => p.alive), ...game.decoys].sort((a, b) => a.y - b.y);
+  for (const e of sorted) {
+    if ('char' in e) e.draw();
+    else drawDecoy(e);
+  }
   // crusher blocks ride above fighters, so the squished vanish beneath them
   for (const c of game.crushers) c.draw();
   // a carried artifact rides above its holder

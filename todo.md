@@ -70,14 +70,15 @@ is the bar.
 Armed/unarmed state machine · clash/parry · charged curve throws · stackable
 powers (Fire/Ice/Bomb/Big/Multi/Extra/Caffeine/Shield/Warp/Stab/Last Laugh/
 Unstoppable/Hot Feet/Telekinesis/Bamboozle/**Disguise**/**Cool Walk**/
-**Weak Arm**) · elemental stacking (**Ice+Bomb freeze**, **Fire+Bomb fire-ring**,
+**Weak Arm**/**Decoy**/**Delayed Death**/**Phase Dash**) · elemental stacking
+(**Ice+Bomb freeze**, **Fire+Bomb fire-ring**, **Multi+Bomb splinter-blasts**,
 **burning/frozen paradox**) · contagious Burning ·
 brittle Frozen (mash-to-break) · soft player collision · Warp squash-kill ·
 3 arenas + random · bottomless pits + teleporters · **bushes (stealth cover)** ·
 **crushers (squish-kill)** · **rain (douses fire)** ·
 **Fall-Protection (Off/Gentle/Extreme)** · 9 fighters · modes: FFA / Team Up /
-Golden Boomerang / **Hide & Seek** · economy decay · 13 match awards (incl.
-**Rambo**, **Trash Compactor**).
+Golden Boomerang / **Hide & Seek** · economy decay · 15 match awards (incl.
+**Rambo**, **Trash Compactor**, **Vengeful Ghost**, **Most Enthusiastic**).
 
 ---
 
@@ -144,10 +145,18 @@ These slot into the existing power architecture cleanly (`powers.ts` +
   freezes if you linger. Mutually exclusive with Hot Feet (`EXCLUSIVE_GROUPS`).
 - **Weak Arm** ✅ DONE — anti-power that halves throw range (`outTime *= 0.5` in
   `doThrow`); barred from being the first book (`NEVER_FIRST`).
-- **Decoy** — on dash, spawn a short-lived clone mimicking appearance/boom count.
-- **Delayed Death** — survive a lethal hit for ~2s before the death finalises
-  (not vs pit/crush). Add a `dyingTimer`.
-- **Dash-Through-Walls** — ignore the solid layer during the dash vector.
+- **Decoy** ✅ DONE — on a dash, spawn a short-lived look-alike clone
+  (`game.decoys`, mimics char/aim/boom count). Bots are drawn to attack the
+  phantom (`ai.ts` decoy-attraction targeting); a foe's boomerang/slash pops it
+  (`resolveDecoyHits`). Capped at 2 clones per fighter. Rendered in `ui/world.ts`
+  with a tell-tale shimmer ring, depth-sorted with the fighters.
+- **Delayed Death** ✅ DONE — a lethal hit (boomerang/fire/explosion, *not*
+  pit/crush) buys ~2s of fully-functional borrowed time before finalising
+  (`Player.dyingTimer`, replayed from `update`). One-shot: the power is spent on
+  trigger. `die(...)` gained an `environmental` flag so pits/crushers bypass it.
+- **Dash-Through-Walls** ✅ DONE — the `PHASE` power skips the solid obstacle
+  layer for the duration of a dash (`resolveCircleObstacles` gated in `update`);
+  map bounds & crushers still stop you.
 - **Battle Royale** — shrinking lethal border toward the collection point
   (needs a dynamic-bounds system; larger).
 - **Stacking matrix** (blueprint "Complex Systemic Interactions"):
@@ -158,8 +167,9 @@ These slot into the existing power architecture cleanly (`powers.ts` +
   - Burning + Frozen paradox → frozen block with burn timer still ticking; on
     burn-out it dies and the ice shatters. ✅ DONE (freeze never clears burn;
     shatter FX in `die`).
-  - Multi + Explosive → still drops the split to 4, but sub-projectiles don't
-    yet carry a (scaled-down) bomb. *(remaining)*
+  - Multi + Explosive → drops the split to 4 and each splinter now carries a
+    scaled-down bomb (`Boomerang.blastScale` 0.62; ice/bomb tags propagated in
+    `doSplit`; transient sub-bombs detonate on flight-end). ✅ DONE
 
 ---
 
@@ -175,9 +185,10 @@ These slot into the existing power architecture cleanly (`powers.ts` +
   collision + rendering (shadow offset).
 - **More content** — toward 12 characters and biome-varied arenas; per-arena
   music/ambience synths.
-- **More awards** — Vengeful Ghost (boomerang kills after owner death),
-  Most Enthusiastic (distance travelled), Switcheroo (floor switches),
-  Trash Compactor (with crushers).
+- **More awards** — Vengeful Ghost ✅ (kills landed after the owner's death,
+  `stats.ghostKills` credited in `die`), Most Enthusiastic ✅ (distance
+  travelled, `stats.distance`), Trash Compactor ✅ (with crushers). Still
+  remaining: Switcheroo (needs floor switches — a new arena mechanic).
 - **Portals/teleporters** could gain the source's velocity-perfect feel + FX.
 
 ---
@@ -195,17 +206,14 @@ These slot into the existing power architecture cleanly (`powers.ts` +
 
 ## Suggested order for a fresh chat
 All four P1 features (Hide & Seek, Crushers + rain, Bushes + Rambo,
-Fall-Protection), the Disguise/Cool Walk/Weak Arm powers, and the elemental
-stacking matrix are ✅ done. Remaining, easiest first:
+Fall-Protection), the Disguise/Cool Walk/Weak Arm powers, the elemental stacking
+matrix, the remaining P2 powers (**Decoy / Delayed Death / Phase Dash**) and
+**Multi + Bomb** are ✅ done. Remaining, easiest first:
 
-1. **More powers** (P2) — the scaffolding is all in place now:
-   - **Decoy** — clone on dash (mimic appearance/boom count).
-   - **Delayed Death** — survive a lethal hit ~2s (`dyingTimer`).
-   - **Dash-Through-Walls** — skip the solid layer during the dash vector.
-2. **Multi + Bomb** — propagate a scaled-down bomb to the 4 sub-projectiles
-   (`doSplit`), the one stacking-matrix case still missing.
-3. **More content** (P3) — toward 12 characters and biome-varied arenas;
-   more awards (Vengeful Ghost, Most Enthusiastic, Switcheroo).
-4. **Battle Royale** power + **vertical dodge/jump** (P3, larger systems).
+1. **More awards** (P3) — Vengeful Ghost ✅ and Most Enthusiastic ✅ done.
+   Switcheroo still needs floor switches first (a new arena mechanic).
+2. **More content** (P3) — toward 12 characters and biome-varied arenas;
+   per-arena music/ambience synths.
+3. **Battle Royale** power + **vertical dodge/jump** (P3, larger systems).
 
 Branch per feature, `npm run build` gate, keep `isEnemy`/telemetry conventions.

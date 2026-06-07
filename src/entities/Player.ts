@@ -46,6 +46,8 @@ interface PlayerStats {
   falls: number; // self-eliminations into a pit          -> "Slow Learner"
   bushTime: number; // seconds spent lurking in cover      -> "Rambo"
   crushDeaths: number; // times squished by a block        -> "Trash Compactor"
+  ghostKills: number; // kills landed after you're dead    -> "Vengeful Ghost"
+  distance: number; // total ground covered (px)           -> "Most Enthusiastic"
 }
 
 /** A fighter — either the human (idx 0) or a CPU-controlled snack. */
@@ -102,6 +104,10 @@ export class Player {
   inBush!: boolean; // standing in leafy cover this frame (bots can't see you)
   role!: 'seeker' | 'hider' | 'none'; // Hide & Seek assignment
   attemptsLeft!: number; // Hide & Seek: seeker's finite pool of throws/slashes
+  dyingTimer!: number; // DELAYED DEATH: seconds of borrowed time after a lethal hit
+  dyingKiller!: Player | null; // who gets the kill once the reprieve runs out
+  dyingDx!: number; // death knock-back direction, replayed when it finalises
+  dyingDy!: number;
 
   constructor(charIdx: number, idx: number, isAI: boolean) {
     this.char = CHARS[charIdx];
@@ -124,6 +130,8 @@ export class Player {
       falls: 0,
       bushTime: 0,
       crushDeaths: 0,
+      ghostKills: 0,
+      distance: 0,
     };
     this.reset(SPAWNS[idx % SPAWNS.length]);
     this.score = 0;
@@ -175,6 +183,10 @@ export class Player {
     this.inBush = false;
     this.role = 'none';
     this.attemptsLeft = 0;
+    this.dyingTimer = 0;
+    this.dyingKiller = null;
+    this.dyingDx = 0;
+    this.dyingDy = 0;
     this.powers.clear(); // modifiers are lost on death / new round
   }
 
@@ -249,6 +261,22 @@ export class Player {
     if (this.slashT > 0) this.slashT = Math.max(0, this.slashT - dt);
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
     if (this.frozen > 0) this.frozen = Math.max(0, this.frozen - dt);
+
+    // DELAYED DEATH: living on borrowed time after a lethal hit. The fighter
+    // keeps playing for the duration, then the death finalises (DELAYED was
+    // already spent in die(), so this second call goes through for real).
+    if (this.dyingTimer > 0) {
+      this.dyingTimer -= dt;
+      if (Math.random() < 0.85) {
+        game.particles.push(
+          new Particle(this.x + rand(-9, 9), this.y + rand(-11, 5), rand(-14, 14), rand(-46, -16), rand(0.25, 0.5), Math.random() < 0.5 ? '#c9b8ff' : '#ff5d6c', rand(2, 4))
+        );
+      }
+      if (this.dyingTimer <= 0) {
+        this.die(this.dyingKiller, this.dyingDx, this.dyingDy);
+        return;
+      }
+    }
 
     // COOL WALK chill: each step on ice slows you and stacks toward a freeze;
     // step off and the chill thaws away.
@@ -358,6 +386,8 @@ export class Player {
         this.invuln = Math.max(this.invuln, 0.26);
         audio.dash();
         spawnDashPuff(this.x, this.y, d, this.char.body);
+        // DECOY: leave a look-alike clone behind at the spot we just bolted from
+        if (this.powers.has('DECOY')) this.spawnDecoy(d);
       }
       // a quick dash beats out flames (Caffeine's reset enables rapid stomping)
       if (this.burning > 0) {
@@ -419,7 +449,11 @@ export class Player {
       this.y = BOUNDS.b - this.r;
       this.vy = 0;
     }
-    resolveCircleObstacles(this);
+    // PHASE DASH: ignore the solid obstacle layer for the duration of a dash,
+    // letting the fighter slip clean through walls (map bounds & crushers still
+    // stop them). On a stalled dash that ends mid-wall, the next frame's resolve
+    // simply pops them out the nearer side.
+    if (!(this.dashT > 0 && this.powers.has('PHASE'))) resolveCircleObstacles(this);
     resolveCrushers(this); // crushing blocks are solid walls while at rest/moving
     resolvePortals(this, dt);
 
@@ -440,6 +474,10 @@ export class Player {
     // leafy cover: lurking in a bush hides you from bots and earns "Rambo"
     this.inBush = inBush(this.x, this.y);
     if (this.inBush) this.stats.bushTime += dt;
+
+    // ground covered, for "Most Enthusiastic" (velocity-based, so instantaneous
+    // teleport/portal jumps don't inflate it)
+    this.stats.distance += Math.hypot(this.vx, this.vy) * dt;
 
     // throw handling
     const telekinetic = this.powers.has('TELEKINESIS');
@@ -544,6 +582,31 @@ export class Player {
     return true;
   }
 
+  /** DECOY: drop a look-alike clone at our current spot as we dash clear. It
+   *  mimics our character, aim and boomerang count to bait the bots; capped at
+   *  two live clones per fighter so the field can't flood with phantoms. */
+  private spawnDecoy(dir: Vec2): void {
+    let mine = 0;
+    for (const d of game.decoys) if (d.ownerIdx === this.idx) mine++;
+    if (mine >= 2) return;
+    const ttl = 3.5;
+    game.decoys.push({
+      x: this.x,
+      y: this.y,
+      vx: dir[0] * 130, // a brief drift so the clone "peels off" before settling
+      vy: dir[1] * 130,
+      charIdx: this.charIdx,
+      aim: [this.aim[0], this.aim[1]],
+      booms: this.boomsInHand,
+      team: this.team,
+      ownerIdx: this.idx,
+      life: ttl,
+      ttl,
+      bob: rand(0, TAU),
+    });
+    spawnRing(this.x, this.y, POWERS.DECOY.color, 1.0);
+  }
+
   doThrow(charge: number): void {
     // Hide & Seek seeker: each throw spends one of a finite pool of attempts.
     if (this.isSeeker) {
@@ -607,19 +670,21 @@ export class Player {
     spawnRing(this.x, this.y, '#0b0712', 1.4);
     spawnRing(this.x, this.y, '#6a4f96', 1.0);
     audio.freeze();
-    // route through die() for the shared bookkeeping (death count, GHOST, etc.)
-    this.die(null, 0, 0);
+    // route through die() for the shared bookkeeping (death count, GHOST, etc.).
+    // Flagged environmental: a pit ignores DELAYED DEATH (you're simply gone).
+    this.die(null, 0, 0, true);
   }
 
   /** Squished by a kinematic block — an environmental death, no killer. */
   crush(): void {
     if (!this.alive || this.invuln > 0) return;
     game.shake = Math.max(game.shake, 16);
-    this.die(null, 0, -1); // Shield (handled in die) can still save you here
+    this.die(null, 0, -1, true); // environmental: Shield still saves, DELAYED doesn't
     if (!this.alive) this.stats.crushDeaths++; // count only an actual squish
   }
 
-  die(killer: Player | null, dirx: number, diry: number): void {
+  /** `environmental` deaths (pits, crushers) bypass the DELAYED DEATH reprieve. */
+  die(killer: Player | null, dirx: number, diry: number, environmental = false): void {
     if (!this.alive) return;
     // Shield intercepts the next lethal hit instead of dying.
     if (this.powers.has('SHIELD')) {
@@ -628,6 +693,20 @@ export class Player {
       this.shieldFlash = 0.4;
       audio.parry();
       spawnRing(this.x, this.y, POWERS.SHIELD.color, 1.3);
+      return;
+    }
+    // DELAYED DEATH: a lethal hit (boomerang/fire/explosion — but not a pit or
+    // crusher) doesn't finalise for ~2s. We stay alive and fully functional;
+    // the death is replayed from update() once the borrowed time runs out. The
+    // power is spent here so that second call falls straight through to dying.
+    if (!environmental && this.dyingTimer <= 0 && this.powers.has('DELAYED')) {
+      this.powers.delete('DELAYED');
+      this.dyingTimer = 2;
+      this.dyingKiller = killer;
+      this.dyingDx = dirx;
+      this.dyingDy = diry;
+      audio.tick();
+      spawnRing(this.x, this.y, POWERS.DELAYED.color, 1.2);
       return;
     }
     // drop the Golden Boomerang where we fall, for the next contender to grab
@@ -650,6 +729,9 @@ export class Player {
       killer.stats.kills++;
       if (wasFrozen) killer.stats.frozenKills++; // "Ice Breaker"
       if (killer.bamboozled > 0) killer.stats.bamboozledKills++; // "Drunken Master"
+      // a kill landed by a dead fighter (their boomerang/bomb/Last Laugh blast
+      // outliving them) is the work of a "Vengeful Ghost"
+      if (!killer.alive) killer.stats.ghostKills++;
     }
     this.burning = 0;
     this.frozen = 0;
