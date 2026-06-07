@@ -165,7 +165,7 @@ export function drawMenu(): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.fillText(
-    'WASD move  ·  Mouse aim  ·  Hold Left-Click to charge & curve throw  ·  Space dash  ·  Right-Click / E slash',
+    'WASD move  ·  Mouse aim  ·  Hold Left-Click to charge & curve throw  ·  Space dash  ·  Shift / F hop  ·  Right-Click / E slash',
     W / 2,
     544
   );

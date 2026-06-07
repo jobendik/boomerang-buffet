@@ -89,6 +89,7 @@ function humanIntents(p: Player): Intents {
     throwHeld: mouse.down,
     dash: keys['Space'],
     slash: mouse.rdown || keys['KeyE'],
+    jump: keys['ShiftLeft'] || keys['ShiftRight'] || keys['KeyF'],
   };
 }
 

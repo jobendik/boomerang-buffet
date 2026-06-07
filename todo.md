@@ -67,7 +67,8 @@ is the bar.
 5. Keep comment density / naming consistent with surrounding code.
 
 ### Current feature inventory (already done)
-Armed/unarmed state machine · clash/parry · charged curve throws · stackable
+Armed/unarmed state machine · clash/parry · charged curve throws ·
+**hop / vertical dodge** · stackable
 powers (Fire/Ice/Bomb/Big/Multi/Extra/Caffeine/Shield/Warp/Stab/Last Laugh/
 Unstoppable/Hot Feet/Telekinesis/Bamboozle/**Disguise**/**Cool Walk**/
 **Weak Arm**/**Decoy**/**Delayed Death**/**Phase Dash**) · elemental stacking
@@ -188,9 +189,14 @@ These slot into the existing power architecture cleanly (`powers.ts` +
   devices (gamepad API), split controls, and menu player-config. Big lift.
 - **Golden mode polish** — time-dilation slow-mo when the carrier gets a kill
   (blueprint). Dynamic hold-time scaling exists; could refine.
-- **Vertical dodge** — a jump/airborne state that lifts you out of the collision
-  radius to leap projectiles/grounded foes (blueprint's Y-axis evasion). Touches
-  collision + rendering (shadow offset).
+- **Vertical dodge** ✅ DONE — a jump (`Shift`/`F`) lifts the fighter into a
+  ~0.5s airborne state (`Player.airT`/`jumpZ`, `JUMP_*` constants). While aloft
+  it tops up `invuln` so every existing damage guard skips it (boomerangs,
+  slashes, fire, blasts, Battle-Royale border all pass under), it sails over
+  grounded fighters (`resolvePlayerCollisions` skip), leaps pits, and doesn't
+  weigh on floor switches — but can't throw/slash/dash (a pure evade). Rendered
+  raised with a shrinking ground shadow; bots hop throws when their dash is on
+  cooldown (`ai.ts`). Controls strip + `JUMP_CD` cooldown.
 - **More content** — 12 characters ✅ (added **Pip** watermelon, **Nibbles**
   carrot, **Scoops** ice-cream) and a biome-varied arena ✅ (**Grove**, a leafy
   pit-free map). Still open: per-arena music/ambience synths; more arenas.
@@ -231,7 +237,9 @@ matrix, the remaining P2 powers (**Decoy / Delayed Death / Phase Dash**) and
    Switcheroo ✅ (+ its floor-switch mechanic) all done.
 2. **More content** (P3) — 12 fighters ✅ + the Grove arena ✅ done. Remaining:
    per-arena music/ambience synths, and yet more arenas if desired.
-3. **Battle Royale** power ✅ done. Remaining larger system: **vertical
-   dodge/jump** (a jump state that lifts you out of the collision radius).
+3. **Battle Royale** power ✅ and **vertical dodge/jump** ✅ done — the P3
+   larger systems are complete. Remaining odds & ends: local multiplayer /
+   controllers (the big one), Golden time-dilation polish, per-arena ambience
+   synths, more arenas/characters.
 
 Branch per feature, `npm run build` gate, keep `isEnemy`/telemetry conventions.
