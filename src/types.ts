@@ -31,6 +31,27 @@ export interface Spawn {
   y: number;
 }
 
+/** A linked teleporter pair: entities at node A are warped to node B and back. */
+export interface Portal {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  r: number;
+}
+
+/** A selectable arena: geometry, spawns, hazards and a colour theme. */
+export interface Arena {
+  name: string;
+  obstacles: Rect[];
+  spawns: Spawn[];
+  pits: Rect[]; // bottomless — a grounded fighter standing in one falls out
+  portals: Portal[];
+  floorA: string;
+  floorB: string;
+  accent: string;
+}
+
 /**
  * Per-frame movement/action intents. Produced by either human input
  * (`humanIntents`) or the AI (`aiThink`) and consumed by `Player.update`.

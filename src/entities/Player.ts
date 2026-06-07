@@ -6,7 +6,7 @@ import { CHARS } from '../data/characters';
 import { SPAWNS } from '../data/arena';
 import { POWERS, ELEMENTAL_EXCLUSIVE, type PowerKey } from '../data/powers';
 import { drawBoomShape, roundRectPath } from '../gfx/shapes';
-import { resolveCircleObstacles } from '../systems/collision';
+import { resolveCircleObstacles, resolvePortals, inPit } from '../systems/collision';
 import { spawnDashPuff, spawnExplosion, spawnRing, spawnSlice } from '../systems/effects';
 import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
@@ -27,6 +27,7 @@ interface AIState {
   strafe: number;
   tStrafe: number;
   tThrow: number;
+  tkSteer: number; // remaining time a bot keeps piloting a telekinetic throw
   goPower: PowerKey | null;
 }
 
@@ -41,6 +42,7 @@ interface PlayerStats {
   bombSelfKills: number; // blown up by your own bomb      -> "Short Fuse"
   bamboozledKills: number; // kills while controls inverted -> "Drunken Master"
   bamboozledTime: number; // seconds suffering inverted ctl -> "Most Bamboozled"
+  falls: number; // self-eliminations into a pit          -> "Slow Learner"
 }
 
 /** A fighter — either the human (idx 0) or a CPU-controlled snack. */
@@ -51,6 +53,8 @@ export class Player {
   isAI: boolean;
   r: number;
   score: number;
+  team: number; // -1 = free-for-all (everyone hostile), else team id
+  goldTime: number; // Golden Boomerang: cumulative seconds carrying the artifact
   aim: Vec2;
   ai: AIState;
   /** Match-cumulative telemetry (survives round resets, drives end awards). */
@@ -82,6 +86,8 @@ export class Player {
   burnSource!: Player | null; // who gets credit if the burn kills us
   bamboozled!: number; // remaining seconds of inverted controls
   trailT!: number; // HOT FEET footprint cadence
+  steering!: boolean; // actively piloting a TELEKINESIS throw this frame
+  portalCd!: number; // teleporter re-entry lockout
   spawnFlash!: number;
   bob!: number;
   shieldFlash!: number;
@@ -104,9 +110,12 @@ export class Player {
       bombSelfKills: 0,
       bamboozledKills: 0,
       bamboozledTime: 0,
+      falls: 0,
     };
     this.reset(SPAWNS[idx % SPAWNS.length]);
     this.score = 0;
+    this.team = -1;
+    this.goldTime = 0;
     this.aim = [1, 0];
     this.ai = {
       tThink: 0,
@@ -114,6 +123,7 @@ export class Player {
       strafe: rand(-1, 1) > 0 ? 1 : -1,
       tStrafe: 0,
       tThrow: rand(0.3, 1.2),
+      tkSteer: 0,
       goPower: null,
     };
   }
@@ -139,6 +149,8 @@ export class Player {
     this.burnSource = null;
     this.bamboozled = 0;
     this.trailT = 0;
+    this.steering = false;
+    this.portalCd = 0;
     this.spawnFlash = 0.6;
     this.bob = rand(0, TAU);
     this.shieldFlash = 0;
@@ -151,6 +163,19 @@ export class Player {
   /** Armed = holding at least one boomerang (can throw & slash). */
   get armed(): boolean {
     return this.boomsInHand > 0;
+  }
+
+  /** True if `o` is a valid target for us (self & teammates are never hostile).
+   *  In free-for-all (team < 0) everyone is fair game. */
+  isEnemy(o: Player): boolean {
+    if (o === this) return false;
+    if (this.team < 0 || o.team < 0) return true;
+    return this.team !== o.team;
+  }
+
+  /** True while this fighter is hauling the Golden Boomerang. */
+  get isGoldCarrier(): boolean {
+    return game.golden != null && game.golden.carrier === this;
   }
 
   /** Apply a collected power-up, honouring stacking & elemental exclusion. */
@@ -246,6 +271,7 @@ export class Player {
     let speedMul = 1;
     if (caffeinated) speedMul = 1.45;
     if (this.charging) speedMul *= 0.55;
+    if (this.isGoldCarrier) speedMul *= 0.85; // hauling the artifact slows you
     const baseSpeed = 235 * speedMul;
     if (frozen) intents.move = [0, 0];
 
@@ -338,11 +364,26 @@ export class Player {
       this.vy = 0;
     }
     resolveCircleObstacles(this);
+    resolvePortals(this, dt);
+
+    // bottomless pits: a grounded fighter who stops over one falls out.
+    // Dashing (dashT > 0) carries you across — leap the gap and you live.
+    if (this.dashT <= 0 && inPit(this.x, this.y)) {
+      this.fall();
+      return;
+    }
 
     // throw handling
+    const telekinetic = this.powers.has('TELEKINESIS');
+    if (this.ai.tkSteer > 0) this.ai.tkSteer = Math.max(0, this.ai.tkSteer - dt);
     if (!frozen) {
       if (this.isAI) {
         if (intents.throwNow && this.armed) this.doThrow(intents.charge ?? 0.6);
+      } else if (telekinetic) {
+        // press-to-launch, hold-to-pilot — no charge meter while telekinetic
+        if (intents.throwHeld && this.armed && !this.hasActiveTk()) this.doThrow(0);
+        this.charging = false;
+        this.charge = 0;
       } else {
         if (intents.throwHeld && this.armed) {
           this.charging = true;
@@ -360,6 +401,20 @@ export class Player {
         }
       }
     }
+
+    // am I actively piloting a telekinetic boomerang this frame?
+    this.steering = false;
+    if (telekinetic && this.hasActiveTk()) {
+      this.steering = this.isAI ? this.ai.tkSteer > 0 : !!intents.throwHeld;
+    }
+  }
+
+  /** True while one of our telekinetic throws is still airborne. */
+  hasActiveTk(): boolean {
+    for (const b of game.boomerangs) {
+      if (!b.dead && b.tk && b.origOwner === this) return true;
+    }
+    return false;
   }
 
   /** Dash → teleport to your nearest airborne boomerang and re-equip it. */
@@ -388,7 +443,7 @@ export class Player {
     audio.catch_();
     // squash-kill: warping straight onto a foe crushes them flat
     for (const q of game.players) {
-      if (q === this || !q.alive || q.invuln > 0) continue;
+      if (!q.alive || q.invuln > 0 || !this.isEnemy(q)) continue;
       if (dist(this.x, this.y, q.x, q.y) < this.r + q.r) {
         const [dx, dy] = norm(q.x - this.x, q.y - this.y);
         q.die(this, dx, dy);
@@ -405,12 +460,20 @@ export class Player {
     const curve = charge * MAX_CURVE; // longer hold => stronger banking curve
     const main = new Boomerang(this, ax * speed, ay * speed, outTime, true);
     main.curve = curve;
-    main.big = this.powers.has('BIG');
-    main.fire = this.powers.has('FIRE');
-    main.ice = this.powers.has('ICE');
-    main.bomb = this.powers.has('BOMB');
-    main.multi = this.powers.has('MULTI');
-    main.unstoppable = this.powers.has('UNSTOPPABLE');
+    // The Golden Boomerang carrier's modifiers are suspended — a plain throw only.
+    if (!this.isGoldCarrier) {
+      main.big = this.powers.has('BIG');
+      main.fire = this.powers.has('FIRE');
+      main.ice = this.powers.has('ICE');
+      main.bomb = this.powers.has('BOMB');
+      main.multi = this.powers.has('MULTI');
+      main.unstoppable = this.powers.has('UNSTOPPABLE');
+      if (this.powers.has('TELEKINESIS')) {
+        main.tk = true;
+        main.curve = 0; // piloted, not arced
+        if (this.isAI) this.ai.tkSteer = 1.3; // bots steer toward the foe for a beat
+      }
+    }
     game.boomerangs.push(main);
     this.boomsInHand--;
     audio.throw_();
@@ -433,6 +496,17 @@ export class Player {
     spawnRing(this.x, this.y, '#bdf0ff', 1.1);
   }
 
+  /** Plunge into a bottomless pit — a self-elimination, no kill credited. */
+  fall(): void {
+    if (!this.alive) return;
+    this.stats.falls++;
+    spawnRing(this.x, this.y, '#0b0712', 1.4);
+    spawnRing(this.x, this.y, '#6a4f96', 1.0);
+    audio.freeze();
+    // route through die() for the shared bookkeeping (death count, GHOST, etc.)
+    this.die(null, 0, 0);
+  }
+
   die(killer: Player | null, dirx: number, diry: number): void {
     if (!this.alive) return;
     // Shield intercepts the next lethal hit instead of dying.
@@ -443,6 +517,19 @@ export class Player {
       audio.parry();
       spawnRing(this.x, this.y, POWERS.SHIELD.color, 1.3);
       return;
+    }
+    // drop the Golden Boomerang where we fall, for the next contender to grab
+    if (this.isGoldCarrier && game.golden) {
+      game.golden.carrier = null;
+      // ...but never strand it down a pit — recentre if we died over the void
+      if (inPit(this.x, this.y)) {
+        game.golden.x = (BOUNDS.l + BOUNDS.r) / 2;
+        game.golden.y = (BOUNDS.t + BOUNDS.b) / 2;
+      } else {
+        game.golden.x = this.x;
+        game.golden.y = this.y;
+      }
+      spawnRing(this.x, this.y, '#ffd23a', 1.4);
     }
     const wasFrozen = this.frozen > 0;
     this.alive = false;
@@ -467,7 +554,7 @@ export class Player {
       game.shake = Math.max(game.shake, 16);
       const R = 84;
       for (const q of game.players) {
-        if (q === this || !q.alive || q.invuln > 0) continue;
+        if (!q.alive || q.invuln > 0 || !this.isEnemy(q)) continue;
         if (dist(this.x, this.y, q.x, q.y) < R + q.r) {
           const [dx, dy] = norm(q.x - this.x, q.y - this.y);
           q.die(this, dx, dy);

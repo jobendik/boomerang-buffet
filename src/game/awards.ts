@@ -80,6 +80,12 @@ const DEFS: AwardDef[] = [
     threshold: 6,
     detail: (v) => Math.round(v) + 's of chaos',
   },
+  {
+    title: 'Slow Learner',
+    value: (p) => p.stats.falls,
+    threshold: 2,
+    detail: (v) => v + ' tumbles into the void',
+  },
 ];
 
 export function computeAwards(): Award[] {

@@ -11,6 +11,14 @@ import type { FirePatch } from '../entities/FirePatch';
 
 export type GamePhase = 'menu' | 'countdown' | 'playing' | 'roundover' | 'matchover';
 
+/** The Golden Boomerang objective (only present in Golden mode). */
+export interface Golden {
+  x: number;
+  y: number;
+  carrier: Player | null;
+  bob: number;
+}
+
 export interface GameState {
   state: GamePhase;
   players: Player[];
@@ -24,6 +32,10 @@ export interface GameState {
   numPlayers: number;
   difficulty: number;
   target: number;
+  arenaSel: number; // -1 = random each round, else fixed ARENAS index
+  mode: number; // 0 = Free-for-all, 1 = Team Up, 2 = Golden Boomerang
+  golden: Golden | null;
+  goldTarget: number; // seconds of carrying needed to win Golden mode
   countdownT: number;
   roundoverT: number;
   roundWinner: Player | null;
@@ -49,6 +61,10 @@ export const game: GameState = {
   numPlayers: 4,
   difficulty: 1,
   target: 5,
+  arenaSel: -1,
+  mode: 0,
+  golden: null,
+  goldTarget: 14,
   countdownT: 0,
   roundoverT: 0,
   roundWinner: null,

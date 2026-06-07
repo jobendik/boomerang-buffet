@@ -4,7 +4,10 @@ import { clamp, TAU } from '../core/math';
 import { audio } from '../core/audio';
 import { mouse } from '../core/input';
 import { CHARS } from '../data/characters';
+import { ARENAS } from '../data/arena';
 import { roundRectPath } from '../gfx/shapes';
+
+const MODE_NAMES = ['Free-for-All', 'Team Up', 'Golden Boom'];
 import { game } from '../game/state';
 import { startMatch } from '../game/flow';
 import { computeAwards } from '../game/awards';
@@ -120,11 +123,21 @@ export function drawMenu(): void {
   ctx.fillText('WIN SCORE', W / 2 + 230, 318);
   drawCounter(W / 2 + 230, 348, game.target, '−', '+', 'target');
 
+  // second row: mode + arena
+  ctx.font = '700 22px "Trebuchet MS"';
+  ctx.fillStyle = '#fff3df';
+  ctx.fillText('MODE', W / 2 - 150, 402);
+  drawCounter(W / 2 - 150, 432, game.mode, '<', '>', 'mode', MODE_NAMES[game.mode]);
+  ctx.fillStyle = '#fff3df';
+  ctx.fillText('ARENA', W / 2 + 150, 402);
+  const arenaName = game.arenaSel < 0 ? 'Random' : ARENAS[game.arenaSel].name;
+  drawCounter(W / 2 + 150, 432, game.arenaSel, '<', '>', 'arena', arenaName);
+
   // play button
   const bw = 280;
-  const bh = 64;
+  const bh = 60;
   const bx = W / 2 - bw / 2;
-  const by = 440;
+  const by = 474;
   const hov = pointIn(mouse.x, mouse.y, bx, by, bw, bh);
   ctx.save();
   ctx.translate(W / 2, by + bh / 2 + (hov ? Math.sin(t * 8) * 2 : 0));
@@ -153,7 +166,7 @@ export function drawMenu(): void {
     544
   );
   ctx.fillText(
-    'Slash clashes incoming boomerangs and slices nearby foes — but once you throw you are unarmed until it returns.',
+    'Slash clashes boomerangs & slices foes · dash beats out flames and leaps pits · grab stacking power-ups to combine effects.',
     W / 2,
     568
   );
@@ -185,6 +198,18 @@ export function handleMenuClick(): void {
         case 'target+':
           game.target = clamp(game.target + 1, 1, 9);
           break;
+        case 'mode-':
+          game.mode = clamp(game.mode - 1, 0, MODE_NAMES.length - 1);
+          break;
+        case 'mode+':
+          game.mode = clamp(game.mode + 1, 0, MODE_NAMES.length - 1);
+          break;
+        case 'arena-':
+          game.arenaSel = clamp(game.arenaSel - 1, -1, ARENAS.length - 1);
+          break;
+        case 'arena+':
+          game.arenaSel = clamp(game.arenaSel + 1, -1, ARENAS.length - 1);
+          break;
       }
       return;
     }
@@ -209,7 +234,13 @@ export function drawMatchOver(): void {
   ctx.font = '900 56px "Trebuchet MS",sans-serif';
   ctx.lineWidth = 7;
   ctx.strokeStyle = '#1a1226';
-  const title = w.isAI ? 'CPU ' + w.char.name + ' WINS!' : 'YOU WIN!';
+  let title: string;
+  if (game.mode === 1) {
+    // Team Up — celebrate the squad, and call out the human's team specially
+    title = w.team === 0 ? 'YOUR TEAM WINS!' : 'TEAM ' + (w.team + 1) + ' WINS!';
+  } else {
+    title = w.isAI ? 'CPU ' + w.char.name + ' WINS!' : 'YOU WIN!';
+  }
   ctx.strokeText(title, W / 2, 250);
   ctx.fillStyle = '#ffce54';
   ctx.fillText(title, W / 2, 250);

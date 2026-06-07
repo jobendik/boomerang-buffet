@@ -29,7 +29,7 @@ export class FirePatch {
       if (
         p.alive &&
         p.invuln <= 0 &&
-        p !== this.owner &&
+        this.owner.isEnemy(p) &&
         this.life > 0.2 &&
         dist(this.x, this.y, p.x, p.y) < this.r + p.r * 0.6
       ) {

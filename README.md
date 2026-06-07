@@ -44,17 +44,25 @@ npm run typecheck
   (speed + dash reset), `Shield` (blocks one lethal hit), `Warp` (teleport — and
   *squash* anyone you land on), `Stab` (lunge-slash gap-closer), `Last Laugh`
   (detonate on death), `Unstoppable` (un-parryable throws), `Hot Feet` (scorch a
-  fiery trail), plus the `Bamboozle` anti-power (inverts your controls — never
-  the first book of a match).
+  fiery trail), `Telekinesis` (remote-pilot your throw toward the cursor while
+  you hold), plus the `Bamboozle` anti-power (inverts your controls — never the
+  first book of a match).
 - **Status effects** — *Burning* spreads fighter-to-fighter and is stomped out
   by dashing; *Frozen* fighters are brittle glass (mash dash to break free, or
   shatter on any bump or boomerang).
 - **Soft body collision** — fighters gently shove each other apart instead of
   overlapping, and crashing into a frozen foe smashes them to pieces.
+- **Game modes** — *Free-for-All*, *Team Up* (two squads, friendly-fire off),
+  and *Golden Boomerang* (hold the artifact a cumulative N seconds to win — your
+  power-ups are suspended while you carry it).
+- **Arenas & hazards** — three selectable arenas (or random each round) with
+  bottomless **pits** (dash to leap them) and linked **teleporters** that warp
+  both fighters and boomerangs while preserving momentum.
 - **Dynamic economy** — power-book spawn odds decay the more powers the leading
   fighter already holds, to curb snowballing.
 - **Match-end awards** — post-match telemetry hands out comedic awards
-  (Fastest Reflexes, Ice Breaker, Pyromaniac, Short Fuse, Drunken Master, …).
+  (Fastest Reflexes, Ice Breaker, Pyromaniac, Short Fuse, Drunken Master, Slow
+  Learner, …).
 
 ## Project structure
 

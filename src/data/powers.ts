@@ -21,6 +21,7 @@ export const POWERS: Record<string, Power> = {
   GHOST: { name: 'Last Laugh', color: '#c9b8ff', icon: '☠' },
   UNSTOPPABLE: { name: 'Unstoppable', color: '#ff4d7a', icon: '●' },
   HOTFEET: { name: 'Hot Feet', color: '#ff9a3a', icon: '➳' },
+  TELEKINESIS: { name: 'Telekinesis', color: '#9d7bff', icon: '◉' },
   BAMBOOZLE: { name: 'Bamboozle', color: '#b06bff', icon: '?' },
 };
 

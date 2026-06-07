@@ -1,5 +1,5 @@
 import { clamp, dist, dist2, lerp, norm, rand } from '../core/math';
-import { OBSTACLES } from '../data/arena';
+import { OBSTACLES, PITS } from '../data/arena';
 import { game } from '../game/state';
 import type { Intents } from '../types';
 import type { Player } from '../entities/Player';
@@ -29,7 +29,7 @@ export function aiThink(p: Player, dt: number): Intents {
   let best: Player | null = null;
   let bd = Infinity;
   for (const q of game.players) {
-    if (q !== p && q.alive) {
+    if (q.alive && p.isEnemy(q)) {
       const d = dist2(p.x, p.y, q.x, q.y);
       if (d < bd) {
         bd = d;
@@ -120,7 +120,7 @@ export function aiThink(p: Player, dt: number): Intents {
   let ddist = 9e9;
   let dangerVec: [number, number] = [0, 0];
   for (const b of game.boomerangs) {
-    if (b.origOwner === p || b.dead) continue;
+    if (b.dead || !b.origOwner.isEnemy(p)) continue;
     const d = dist(b.x, b.y, p.x, p.y);
     if (d < 150) {
       const toMe = norm(p.x - b.x, p.y - b.y);
@@ -167,6 +167,18 @@ export function aiThink(p: Player, dt: number): Intents {
       const [ax, ay] = norm(p.x - hz.x, p.y - hz.y);
       mvx += ax * 1.5;
       mvy += ay * 1.5;
+    }
+  }
+
+  // steer away from the lip of any bottomless pit (strong, short-range repulsion)
+  for (const P of PITS) {
+    const cx = P.x + P.w / 2;
+    const cy = P.y + P.h / 2;
+    const margin = 46;
+    if (p.x > P.x - margin && p.x < P.x + P.w + margin && p.y > P.y - margin && p.y < P.y + P.h + margin) {
+      const [ax, ay] = norm(p.x - cx, p.y - cy);
+      mvx += ax * 2.4;
+      mvy += ay * 2.4;
     }
   }
 
