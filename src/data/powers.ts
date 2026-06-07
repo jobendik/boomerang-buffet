@@ -17,6 +17,12 @@ export const POWERS: Record<string, Power> = {
   SPEED: { name: 'Caffeine', color: '#a0ff6b', icon: '»' },
   SHIELD: { name: 'Shield', color: '#ffe08a', icon: '◈' },
   TELEPORT: { name: 'Warp', color: '#8affd6', icon: '➤' },
+  STAB: { name: 'Stab', color: '#ff8b5e', icon: '➹' },
+  GHOST: { name: 'Last Laugh', color: '#c9b8ff', icon: '☠' },
+  UNSTOPPABLE: { name: 'Unstoppable', color: '#ff4d7a', icon: '●' },
+  HOTFEET: { name: 'Hot Feet', color: '#ff9a3a', icon: '➳' },
+  TELEKINESIS: { name: 'Telekinesis', color: '#9d7bff', icon: '◉' },
+  BAMBOOZLE: { name: 'Bamboozle', color: '#b06bff', icon: '?' },
 };
 
 export type PowerKey = keyof typeof POWERS;
@@ -25,3 +31,10 @@ export const POWER_KEYS = Object.keys(POWERS) as PowerKey[];
 
 /** Elemental powers are mutually exclusive — acquiring one removes the other. */
 export const ELEMENTAL_EXCLUSIVE: PowerKey[] = ['FIRE', 'ICE'];
+
+/**
+ * BAMBOOZLE is an *anti*-powerup (inverts your controls). Per the source
+ * design it is never the first book spawned in a match, so a new player is
+ * not immediately punished by mystery controls.
+ */
+export const NEVER_FIRST: PowerKey[] = ['BAMBOOZLE'];

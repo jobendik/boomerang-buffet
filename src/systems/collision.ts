@@ -1,6 +1,6 @@
 import { audio } from '../core/audio';
 import { clamp, dist, dist2, norm, TAU } from '../core/math';
-import { OBSTACLES } from '../data/arena';
+import { OBSTACLES, PITS, PORTALS } from '../data/arena';
 import { SLASH_RANGE, SLASH_HALF } from '../constants';
 import { game } from '../game/state';
 import { spawnRing } from './effects';
@@ -34,11 +34,53 @@ export function resolveCircleObstacles(o: { x: number; y: number; r: number }): 
   }
 }
 
+/** Is a point inside any bottomless pit? (boomerangs fly over, so only the
+ *  grounded fighters consult this.) */
+export function inPit(x: number, y: number): boolean {
+  for (const P of PITS) {
+    if (x > P.x && x < P.x + P.w && y > P.y && y < P.y + P.h) return true;
+  }
+  return false;
+}
+
+/**
+ * Linked teleporters: an entity touching one node is whisked to its twin with
+ * velocity preserved, then made immune for a beat so it doesn't ping-pong.
+ * Works for both players and boomerangs (any { x, y, vx, vy, portalCd }).
+ */
+export function resolvePortals(e: { x: number; y: number; vx: number; vy: number; portalCd: number }, dt: number): void {
+  if (e.portalCd > 0) {
+    e.portalCd = Math.max(0, e.portalCd - dt);
+    return;
+  }
+  for (const P of PORTALS) {
+    let ex = 0;
+    let ey = 0;
+    if (dist(e.x, e.y, P.ax, P.ay) < P.r) {
+      ex = P.bx;
+      ey = P.by;
+    } else if (dist(e.x, e.y, P.bx, P.by) < P.r) {
+      ex = P.ax;
+      ey = P.ay;
+    } else {
+      continue;
+    }
+    const [nx, ny] = norm(e.vx, e.vy);
+    spawnRing(e.x, e.y, '#8affd6', 0.9);
+    e.x = ex + nx * (P.r + 6);
+    e.y = ey + ny * (P.r + 6);
+    e.portalCd = 0.4;
+    spawnRing(e.x, e.y, '#8affd6', 0.9);
+    audio.dash();
+    return;
+  }
+}
+
 export function nearestEnemy(p: Player): Player | null {
   let best: Player | null = null;
   let bd = Infinity;
   for (const q of game.players) {
-    if (q !== p && q.alive) {
+    if (q.alive && p.isEnemy(q)) {
       const d = dist2(p.x, p.y, q.x, q.y);
       if (d < bd) {
         bd = d;
@@ -66,6 +108,7 @@ export function deflect(b: Boomerang, p: Player): void {
   if (b.isMain) b.origOwner.loseBoomerang();
   b.isMain = false;
   b.transient = true;
+  b.tk = false; // a parry severs the telekinetic control link
   b.curve = 0;
   b.life = 1.0;
   b.phase = 'out';
@@ -79,20 +122,22 @@ export function resolveBoomerangHits(): void {
     if (b.dead) continue;
     for (const p of game.players) {
       if (!p.alive) continue;
-      if (p === b.origOwner) continue; // a boomerang never slices its current owner
+      if (!b.origOwner.isEnemy(p)) continue; // never slices its owner or teammates
       if (p.invuln > 0) continue;
       if (dist(b.x, b.y, p.x, p.y) < b.hitR + p.r) {
         if (b.bomb) {
           b.explode();
           break;
         }
-        if (b.ice) {
-          if (p.frozen > 0) {
-            const [dx, dy] = norm(p.x - b.x, p.y - b.y);
-            p.die(b.origOwner, dx, dy);
-          } else {
-            p.freeze();
-          }
+        if (p.frozen > 0) {
+          // a frozen fighter is brittle glass: ANY contact shatters them
+          const [dx, dy] = norm(b.vx, b.vy);
+          p.die(b.origOwner, dx, dy);
+        } else if (b.ice) {
+          p.freeze();
+        } else if (b.fire) {
+          // fire doesn't slice — it sets the target alight (a spreading DOT)
+          p.ignite(b.origOwner);
         } else {
           const [dx, dy] = norm(b.vx, b.vy);
           p.die(b.origOwner, dx, dy);
@@ -115,7 +160,7 @@ export function resolveSlashes(): void {
 
     // melee kills
     for (const q of game.players) {
-      if (q === p || !q.alive || q.invuln > 0) continue;
+      if (!q.alive || q.invuln > 0 || !p.isEnemy(q)) continue;
       if (dist(p.x, p.y, q.x, q.y) < reach + q.r) {
         const ang = Math.atan2(q.y - p.y, q.x - p.x);
         if (angDiff(a, ang) < SLASH_HALF) {
@@ -135,6 +180,7 @@ export function resolveSlashes(): void {
             b.explode();
             continue;
           }
+          if (b.unstoppable) continue; // UNSTOPPABLE throws can't be parried
           deflect(b, p);
           p.stats.clashes++;
           audio.parry();
@@ -142,6 +188,67 @@ export function resolveSlashes(): void {
           game.shake = Math.max(game.shake, 6);
           game.hitstop = Math.max(game.hitstop, 0.05);
         }
+      }
+    }
+  }
+}
+
+/**
+ * Soft body-vs-body resolution between fighters: gently separate overlapping
+ * players (so they can't stack), and shatter any frozen fighter that gets
+ * bumped — the brittle-ice rule from the source design.
+ */
+export function resolvePlayerCollisions(): void {
+  const ps = game.players;
+  for (let i = 0; i < ps.length; i++) {
+    const a = ps[i];
+    if (!a.alive) continue;
+    for (let j = i + 1; j < ps.length; j++) {
+      const b = ps[j];
+      if (!b.alive) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const min = a.r + b.r;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= min * min) continue;
+      const d = Math.sqrt(d2) || 0.0001;
+      // a frozen fighter bumped by an ENEMY is smashed apart on the spot
+      if (a.frozen > 0 && b.frozen <= 0 && a.invuln <= 0 && a.isEnemy(b)) {
+        a.die(b, dx / d, dy / d);
+        continue;
+      }
+      if (b.frozen > 0 && a.frozen <= 0 && b.invuln <= 0 && b.isEnemy(a)) {
+        b.die(a, -dx / d, -dy / d);
+        continue;
+      }
+      // otherwise just push them apart evenly
+      const push = (min - d) / 2;
+      const nx = dx / d;
+      const ny = dy / d;
+      a.x -= nx * push;
+      a.y -= ny * push;
+      b.x += nx * push;
+      b.y += ny * push;
+    }
+  }
+}
+
+/**
+ * Contagious fire: a burning fighter sets light to anyone they touch, and
+ * burning bots clustered together cascade into each other (a quirk the AI is
+ * happy to walk into).
+ */
+export function spreadFire(): void {
+  const ps = game.players;
+  for (let i = 0; i < ps.length; i++) {
+    const a = ps[i];
+    if (!a.alive || a.burning <= 0) continue;
+    for (let j = 0; j < ps.length; j++) {
+      if (i === j) continue;
+      const b = ps[j];
+      if (!b.alive || b.burning > 0 || b.invuln > 0 || !a.isEnemy(b)) continue;
+      if (dist2(a.x, a.y, b.x, b.y) < (a.r + b.r + 4) * (a.r + b.r + 4)) {
+        b.ignite(a.burnSource ?? a);
       }
     }
   }

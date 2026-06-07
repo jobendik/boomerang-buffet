@@ -142,6 +142,108 @@ function drawOrange(c: Char, r: number, look: Vec2): void {
   mouthSmile(r);
 }
 
+function drawDonut(c: Char, r: number, look: Vec2): void {
+  // dough ring
+  ctx.fillStyle = c.dark;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = c.body;
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.9, 0, TAU);
+  ctx.fill();
+  // pink glaze with a drippy lower edge
+  ctx.fillStyle = c.accent;
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 0.9);
+  for (let i = 0; i <= 18; i++) {
+    const a = (i / 18) * TAU;
+    const rr = r * (0.86 + 0.1 * Math.max(0, Math.sin(a * 5)) * (Math.sin(a) > 0 ? 1 : 0.2));
+    ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fill();
+  // sprinkles
+  const sprinkle = ['#ff5d6c', '#7ad06d', '#ffd23a', '#8affd6', '#fff'];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * TAU + 0.4;
+    const rr = r * 0.6;
+    ctx.save();
+    ctx.translate(Math.cos(a) * rr, Math.sin(a) * rr);
+    ctx.rotate(a * 1.7);
+    ctx.fillStyle = sprinkle[i % sprinkle.length];
+    roundRectPath(-r * 0.04, -r * 0.12, r * 0.08, r * 0.24, r * 0.04);
+    ctx.fill();
+    ctx.restore();
+  }
+  // hole
+  ctx.fillStyle = '#2a1f36';
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.3, 0, TAU);
+  ctx.fill();
+  eyes(r * 0.78, look);
+}
+
+function drawChili(c: Char, r: number, look: Vec2): void {
+  // glossy curved pepper body
+  ctx.fillStyle = c.dark;
+  ctx.beginPath();
+  ctx.moveTo(0, r * 1.08);
+  ctx.bezierCurveTo(r * 0.92, r * 0.7, r * 0.86, -r * 0.5, r * 0.16, -r * 0.78);
+  ctx.bezierCurveTo(-r * 0.5, -r * 0.95, -r * 0.95, r * 0.3, 0, r * 1.08);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = c.body;
+  ctx.beginPath();
+  ctx.moveTo(0, r * 0.95);
+  ctx.bezierCurveTo(r * 0.74, r * 0.62, r * 0.7, -r * 0.4, r * 0.12, -r * 0.62);
+  ctx.bezierCurveTo(-r * 0.42, -r * 0.78, -r * 0.78, r * 0.3, 0, r * 0.95);
+  ctx.closePath();
+  ctx.fill();
+  // shine
+  ctx.strokeStyle = 'rgba(255,255,255,.45)';
+  ctx.lineWidth = r * 0.1;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.2, r * 0.5);
+  ctx.quadraticCurveTo(-r * 0.4, -r * 0.1, -r * 0.05, -r * 0.4);
+  ctx.stroke();
+  // green stem
+  ctx.strokeStyle = c.accent;
+  ctx.lineWidth = r * 0.16;
+  ctx.beginPath();
+  ctx.moveTo(r * 0.14, -r * 0.66);
+  ctx.quadraticCurveTo(r * 0.4, -r * 0.95, r * 0.05, -r * 1.05);
+  ctx.stroke();
+  eyes(r * 0.78, look);
+  mouthSmile(r * 0.7);
+}
+
+function drawShroom(c: Char, r: number, look: Vec2): void {
+  // cream stem
+  ctx.fillStyle = c.accent;
+  roundRectPath(-r * 0.42, r * 0.05, r * 0.84, r * 0.95, r * 0.3);
+  ctx.fill();
+  // red cap
+  ctx.fillStyle = c.dark;
+  ctx.beginPath();
+  ctx.ellipse(0, r * 0.05, r, r * 0.72, 0, Math.PI, TAU);
+  ctx.fill();
+  ctx.fillStyle = c.body;
+  ctx.beginPath();
+  ctx.ellipse(0, r * 0.1, r * 0.92, r * 0.64, 0, Math.PI, TAU);
+  ctx.fill();
+  // white spots
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  for (const s of [[-0.5, -0.25, 0.18], [0.45, -0.2, 0.2], [0.0, -0.42, 0.15], [-0.12, -0.05, 0.12]] as const) {
+    ctx.beginPath();
+    ctx.ellipse(s[0] * r, s[1] * r, s[2] * r, s[2] * r * 0.8, 0, 0, TAU);
+    ctx.fill();
+  }
+  eyes(r * 0.82, [look[0], Math.max(0, look[1])]);
+  mouthSmile(r * 0.7);
+}
+
 export const CHARS: Char[] = [
   { name: 'Avo', body: '#7fc242', dark: '#5a9430', accent: '#7a4a2a', draw: drawAvo },
   { name: 'Toastie', body: '#f2c177', dark: '#c98f43', accent: '#8a5a2a', draw: drawToast },
@@ -149,4 +251,7 @@ export const CHARS: Char[] = [
   { name: 'Berry', body: '#ff5d6c', dark: '#d83b4c', accent: '#7ad06d', draw: drawBerry },
   { name: 'Brock', body: '#5fae57', dark: '#3f8a3a', accent: '#caa66a', draw: drawBroc },
   { name: 'Citra', body: '#ff9f33', dark: '#e07d12', accent: '#ffd98a', draw: drawOrange },
+  { name: 'Sprinkle', body: '#c98f5a', dark: '#a06c3e', accent: '#ff9ecb', draw: drawDonut },
+  { name: 'Pepito', body: '#ff4d3a', dark: '#c9301f', accent: '#5fae57', draw: drawChili },
+  { name: 'Button', body: '#ff5d5d', dark: '#d83b3b', accent: '#f7efd8', draw: drawShroom },
 ];

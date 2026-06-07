@@ -1,11 +1,44 @@
-import { norm, rand } from '../core/math';
+import { audio } from '../core/audio';
+import { dist, norm, rand } from '../core/math';
 import { keys, mouse } from '../core/input';
 import { aiThink } from '../systems/ai';
-import { resolveBoomerangHits, resolveSlashes } from '../systems/collision';
+import { resolveBoomerangHits, resolvePlayerCollisions, resolveSlashes, spreadFire } from '../systems/collision';
+import { spawnRing } from '../systems/effects';
 import { game } from './state';
 import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
 import type { Intents } from '../types';
 import type { Player } from '../entities/Player';
+
+/** Golden Boomerang objective: pick-up-by-touch, accumulate hold time, win. */
+function updateGolden(dt: number): void {
+  const g = game.golden;
+  if (!g) return;
+  g.bob += dt;
+  const carrier = g.carrier;
+  if (carrier && carrier.alive) {
+    g.x = carrier.x;
+    g.y = carrier.y - carrier.r - 12;
+    carrier.goldTime += dt;
+    if (carrier.goldTime >= game.goldTarget) {
+      game.matchWinner = carrier;
+      game.roundWinner = carrier;
+      game.state = 'roundover';
+      game.roundoverT = 2.2;
+      audio.win();
+    }
+    return;
+  }
+  // unheld: the first living fighter to touch it becomes the new carrier
+  g.carrier = null;
+  for (const p of game.players) {
+    if (p.alive && dist(p.x, p.y, g.x, g.y) < p.r + 16) {
+      g.carrier = p;
+      spawnRing(p.x, p.y, '#ffd23a', 1.3);
+      audio.power();
+      break;
+    }
+  }
+}
 
 /** Per-frame simulation step and human input translation. */
 
@@ -61,6 +94,9 @@ export function update(dt: number): void {
       const intents = p.isAI ? aiThink(p, dt) : humanIntents(p);
       p.update(dt, intents);
     }
+    resolvePlayerCollisions(); // soft separation + frozen-shatter-on-bump
+    spreadFire(); // burning fighters ignite their neighbours
+    updateGolden(dt); // Golden Boomerang carry/score (no-op in other modes)
     // boomerangs
     for (const b of game.boomerangs) b.update(dt);
     resolveBoomerangHits();

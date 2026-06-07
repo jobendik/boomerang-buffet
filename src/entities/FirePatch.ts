@@ -1,5 +1,5 @@
 import { ctx } from '../core/canvas';
-import { clamp, dist, norm, rand, TAU } from '../core/math';
+import { clamp, dist, rand, TAU } from '../core/math';
 import { game } from '../game/state';
 import { Particle } from './Particle';
 import type { Player } from './Player';
@@ -29,12 +29,13 @@ export class FirePatch {
       if (
         p.alive &&
         p.invuln <= 0 &&
-        p !== this.owner &&
+        this.owner.isEnemy(p) &&
         this.life > 0.2 &&
         dist(this.x, this.y, p.x, p.y) < this.r + p.r * 0.6
       ) {
-        const [dx, dy] = norm(p.x - this.x, p.y - this.y);
-        p.die(this.owner, dx, dy);
+        // stepping in fire sets you alight rather than killing instantly,
+        // so you can still dash clear before the flames finish you off
+        p.ignite(this.owner);
       }
     }
     if (Math.random() < 0.5) {

@@ -46,11 +46,28 @@ export function drawHUD(): void {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(p.isAI ? 'CPU ' + p.char.name : 'YOU', 44, 13);
-    // score pips
-    for (let i = 0; i < game.target; i++) {
-      ctx.fillStyle = i < p.score ? p.char.body : 'rgba(255,255,255,.18)';
-      ctx.beginPath();
-      ctx.arc(48 + i * 14, 28, 4.5, 0, TAU);
+    if (game.mode === 2) {
+      // Golden mode: a hold-progress bar toward the win
+      const bw = 86;
+      ctx.fillStyle = 'rgba(255,255,255,.16)';
+      roundRectPath(48, 24, bw, 7, 3);
+      ctx.fill();
+      ctx.fillStyle = '#ffd23a';
+      roundRectPath(48, 24, bw * Math.min(1, p.goldTime / game.goldTarget), 7, 3);
+      ctx.fill();
+    } else {
+      // score pips
+      for (let i = 0; i < game.target; i++) {
+        ctx.fillStyle = i < p.score ? p.char.body : 'rgba(255,255,255,.18)';
+        ctx.beginPath();
+        ctx.arc(48 + i * 14, 28, 4.5, 0, TAU);
+        ctx.fill();
+      }
+    }
+    // Team Up: a coloured stripe down the card's left edge marks the squad
+    if (game.mode === 1 && p.team >= 0) {
+      ctx.fillStyle = p.team === 0 ? '#5ad1ff' : '#ff7ad0';
+      roundRectPath(2, 6, 5, 28, 2.5);
       ctx.fill();
     }
     // stacked power icons
@@ -75,11 +92,15 @@ export function drawHUD(): void {
     ctx.restore();
     sx += cardW + gap;
   }
-  // round number
+  // round number / objective
   ctx.fillStyle = 'rgba(255,255,255,.5)';
   ctx.font = '700 14px "Trebuchet MS"';
   ctx.textAlign = 'center';
-  ctx.fillText('ROUND ' + game.roundNum + '  ·  first to ' + game.target, W / 2, 62);
+  let banner: string;
+  if (game.mode === 2) banner = 'GOLDEN BOOMERANG  ·  hold it ' + game.goldTarget + 's to win';
+  else if (game.mode === 1) banner = 'TEAM UP  ·  round ' + game.roundNum + '  ·  first to ' + game.target;
+  else banner = 'ROUND ' + game.roundNum + '  ·  first to ' + game.target;
+  ctx.fillText(banner, W / 2, 62);
 }
 
 /** Big stroked headline with optional sub-line, centered on screen. */

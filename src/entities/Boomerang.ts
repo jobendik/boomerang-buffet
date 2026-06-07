@@ -4,7 +4,7 @@ import { dist, lerp, norm, TAU } from '../core/math';
 import { BOUNDS } from '../constants';
 import { OBSTACLES } from '../data/arena';
 import { drawBoomShape } from '../gfx/shapes';
-import { circleRect } from '../systems/collision';
+import { circleRect, resolvePortals } from '../systems/collision';
 import { spawnExplosion } from '../systems/effects';
 import { game } from '../game/state';
 import { FirePatch } from './FirePatch';
@@ -35,9 +35,12 @@ export class Boomerang {
   ice: boolean;
   bomb: boolean;
   multi: boolean;
+  unstoppable: boolean;
+  tk: boolean; // TELEKINESIS — steered by the owner's aim while they hold throw
   dead: boolean;
   fireT: number;
   bounceFlash: number;
+  portalCd: number;
 
   constructor(owner: Player, vx: number, vy: number, outTime: number, isMain: boolean) {
     this.owner = owner;
@@ -59,9 +62,12 @@ export class Boomerang {
     this.ice = false;
     this.bomb = false;
     this.multi = false;
+    this.unstoppable = false;
+    this.tk = false;
     this.dead = false;
     this.fireT = 0;
     this.bounceFlash = 0;
+    this.portalCd = 0;
   }
 
   get hitR(): number {
@@ -80,8 +86,25 @@ export class Boomerang {
     }
     const owner = this.owner;
 
+    // TELEKINESIS: while the owner holds the throw and stays alive, the
+    // projectile is remote-piloted toward their aim instead of arcing home.
+    if (this.tk) {
+      if (owner.alive && owner.steering && !this.transient) {
+        this.phase = 'out';
+        const sp = 440;
+        const tvx = owner.aim[0] * sp;
+        const tvy = owner.aim[1] * sp;
+        const k = 1 - Math.pow(0.0006, dt);
+        this.vx = lerp(this.vx, tvx, k);
+        this.vy = lerp(this.vy, tvy, k);
+      } else {
+        this.tk = false; // link released (or lost) → fall back to homing return
+        this.phase = 'return';
+      }
+    }
+
     // charged banking curve while flying out
-    if (this.phase === 'out' && this.curve) {
+    if (!this.tk && this.phase === 'out' && this.curve) {
       const c = Math.cos(this.curve * dt);
       const s = Math.sin(this.curve * dt);
       const nvx = this.vx * c - this.vy * s;
@@ -90,8 +113,8 @@ export class Boomerang {
       this.vy = nvy;
     }
 
-    // phase / apex
-    if (this.phase === 'out') {
+    // phase / apex (telekinetic flight has no fixed apex — the pilot decides)
+    if (this.phase === 'out' && !this.tk) {
       this.outT -= dt;
       if (this.outT <= 0 && !this.transient) {
         if (this.multi) {
@@ -181,6 +204,9 @@ export class Boomerang {
       if (Math.random() < 0.5) audio.tick();
     }
 
+    // teleporters carry boomerangs through too (velocity preserved)
+    resolvePortals(this, dt);
+
     // fire trail drops
     if (this.fire) {
       this.fireT -= dt;
@@ -213,6 +239,7 @@ export class Boomerang {
       ex.transient = true;
       ex.life = 0.6;
       ex.fire = this.fire; // sub-projectiles keep the fire trail (smaller footprint)
+      ex.unstoppable = this.unstoppable; // an un-parryable fan stays un-parryable
       game.boomerangs.push(ex);
     }
     audio.throw_();
@@ -227,9 +254,14 @@ export class Boomerang {
     spawnExplosion(this.x, this.y);
     const R = 78;
     for (const p of game.players) {
-      if (p.alive && p.invuln <= 0 && dist(this.x, this.y, p.x, p.y) < R + p.r) {
+      if (!p.alive || p.invuln > 0) continue;
+      const self = p === this.origOwner;
+      // a blast hits enemies and the careless thrower, but spares teammates
+      if (!self && !this.origOwner.isEnemy(p)) continue;
+      if (dist(this.x, this.y, p.x, p.y) < R + p.r) {
         const [dx, dy] = norm(p.x - this.x, p.y - this.y);
         p.die(this.origOwner, dx, dy);
+        if (self) this.origOwner.stats.bombSelfKills++; // "Short Fuse"
       }
     }
     if (this.isMain) this.origOwner.loseBoomerang();
@@ -242,6 +274,19 @@ export class Boomerang {
   }
 
   draw(): void {
+    // telekinetic control tether back to the pilot
+    if (this.tk && this.owner.alive) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = '#9d7bff';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.moveTo(this.owner.x, this.owner.y);
+      ctx.lineTo(this.x, this.y);
+      ctx.stroke();
+      ctx.restore();
+    }
     // trail
     if (this.fire) {
       const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.hitR + 10);

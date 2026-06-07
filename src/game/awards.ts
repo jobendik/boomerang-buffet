@@ -50,6 +50,42 @@ const DEFS: AwardDef[] = [
     threshold: 1,
     detail: (v) => v + ' kills',
   },
+  {
+    title: 'Ice Breaker',
+    value: (p) => p.stats.frozenKills,
+    threshold: 1,
+    detail: (v) => v + ' foes shattered',
+  },
+  {
+    title: 'Pyromaniac',
+    value: (p) => p.stats.burnKills,
+    threshold: 1,
+    detail: (v) => v + ' burned to a crisp',
+  },
+  {
+    title: 'Short Fuse',
+    value: (p) => p.stats.bombSelfKills,
+    threshold: 1,
+    detail: (v) => v + ' self-detonations',
+  },
+  {
+    title: 'Drunken Master',
+    value: (p) => p.stats.bamboozledKills,
+    threshold: 1,
+    detail: (v) => v + ' kills while dizzy',
+  },
+  {
+    title: 'Most Bamboozled',
+    value: (p) => p.stats.bamboozledTime,
+    threshold: 6,
+    detail: (v) => Math.round(v) + 's of chaos',
+  },
+  {
+    title: 'Slow Learner',
+    value: (p) => p.stats.falls,
+    threshold: 2,
+    detail: (v) => v + ' tumbles into the void',
+  },
 ];
 
 export function computeAwards(): Award[] {
