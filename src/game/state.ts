@@ -3,6 +3,7 @@ import type { Boomerang } from '../entities/Boomerang';
 import type { Pickup } from '../entities/Pickup';
 import type { Particle } from '../entities/Particle';
 import type { FirePatch } from '../entities/FirePatch';
+import type { Crusher } from '../entities/Crusher';
 
 /**
  * The single mutable game-state container. Kept dependency-light (type-only
@@ -26,6 +27,8 @@ export interface GameState {
   pickups: Pickup[];
   particles: Particle[];
   hazards: FirePatch[];
+  crushers: Crusher[];
+  raining: boolean; // weather: douses fire on contact (pit-free maps only)
   time: number;
   shake: number;
   hitstop: number;
@@ -33,9 +36,13 @@ export interface GameState {
   difficulty: number;
   target: number;
   arenaSel: number; // -1 = random each round, else fixed ARENAS index
-  mode: number; // 0 = Free-for-all, 1 = Team Up, 2 = Golden Boomerang
+  mode: number; // 0 = Free-for-all, 1 = Team Up, 2 = Golden Boomerang, 3 = Hide & Seek
+  fallProtect: number; // pit accessibility: 0 = Off, 1 = Gentle, 2 = Extreme
   golden: Golden | null;
   goldTarget: number; // seconds of carrying needed to win Golden mode
+  hsSetup: number; // Hide & Seek: remaining seeker-blind setup time
+  hsTimer: number; // Hide & Seek: remaining hunt time before the hiders win
+  hsDecoys: { x: number; y: number; propIdx: number }[]; // inert lookalike props
   countdownT: number;
   roundoverT: number;
   roundWinner: Player | null;
@@ -55,6 +62,8 @@ export const game: GameState = {
   pickups: [],
   particles: [],
   hazards: [],
+  crushers: [],
+  raining: false,
   time: 0,
   shake: 0,
   hitstop: 0,
@@ -63,8 +72,12 @@ export const game: GameState = {
   target: 5,
   arenaSel: -1,
   mode: 0,
+  fallProtect: 0,
   golden: null,
   goldTarget: 14,
+  hsSetup: 0,
+  hsTimer: 0,
+  hsDecoys: [],
   countdownT: 0,
   roundoverT: 0,
   roundWinner: null,

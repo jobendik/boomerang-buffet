@@ -1,6 +1,6 @@
 import { audio } from '../core/audio';
 import { clamp, dist, dist2, norm, TAU } from '../core/math';
-import { OBSTACLES, PITS, PORTALS } from '../data/arena';
+import { OBSTACLES, PITS, PORTALS, BUSHES } from '../data/arena';
 import { SLASH_RANGE, SLASH_HALF } from '../constants';
 import { game } from '../game/state';
 import { spawnRing } from './effects';
@@ -34,11 +34,62 @@ export function resolveCircleObstacles(o: { x: number; y: number; r: number }): 
   }
 }
 
+/** Push a circular body out of every active crushing block (they're solid). */
+export function resolveCrushers(o: { x: number; y: number; r: number }): void {
+  for (const c of game.crushers) {
+    const r = circleRect(o.x, o.y, o.r, c);
+    if (r.hit) {
+      o.x += r.nx! * r.pen!;
+      o.y += r.ny! * r.pen!;
+    }
+  }
+}
+
+/**
+ * Fall-Protection: Extreme — treat every bottomless pit as a solid wall at
+ * runtime, pushing a fighter out so they can never tumble in.
+ */
+export function resolvePitSolids(o: { x: number; y: number; r: number }): void {
+  for (const R of PITS) {
+    const r = circleRect(o.x, o.y, o.r, R);
+    if (r.hit) {
+      o.x += r.nx! * r.pen!;
+      o.y += r.ny! * r.pen!;
+    }
+  }
+}
+
+/**
+ * Fall-Protection: Gentle — apply a repulsive nudge to a fighter drifting
+ * toward a pit lip, steering them back to safe ground (danger is reduced, not
+ * removed: a committed dash can still carry you over).
+ */
+export function nudgeFromPits(o: { x: number; y: number; vx: number; vy: number }, dt: number): void {
+  const margin = 30;
+  for (const P of PITS) {
+    const cx = P.x + P.w / 2;
+    const cy = P.y + P.h / 2;
+    if (o.x > P.x - margin && o.x < P.x + P.w + margin && o.y > P.y - margin && o.y < P.y + P.h + margin) {
+      const [nx, ny] = norm(o.x - cx, o.y - cy);
+      o.vx += nx * 900 * dt;
+      o.vy += ny * 900 * dt;
+    }
+  }
+}
+
 /** Is a point inside any bottomless pit? (boomerangs fly over, so only the
  *  grounded fighters consult this.) */
 export function inPit(x: number, y: number): boolean {
   for (const P of PITS) {
     if (x > P.x && x < P.x + P.w && y > P.y && y < P.y + P.h) return true;
+  }
+  return false;
+}
+
+/** Is a point inside leafy cover? (hides a fighter from bots; feeds "Rambo".) */
+export function inBush(x: number, y: number): boolean {
+  for (const B of BUSHES) {
+    if (x > B.x && x < B.x + B.w && y > B.y && y < B.y + B.h) return true;
   }
   return false;
 }

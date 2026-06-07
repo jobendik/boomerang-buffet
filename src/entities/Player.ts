@@ -5,8 +5,8 @@ import { BOUNDS, SLASH_RANGE, SLASH_HALF } from '../constants';
 import { CHARS } from '../data/characters';
 import { SPAWNS } from '../data/arena';
 import { POWERS, ELEMENTAL_EXCLUSIVE, type PowerKey } from '../data/powers';
-import { drawBoomShape, roundRectPath } from '../gfx/shapes';
-import { resolveCircleObstacles, resolvePortals, inPit } from '../systems/collision';
+import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
+import { resolveCircleObstacles, resolveCrushers, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
 import { spawnDashPuff, spawnExplosion, spawnRing, spawnSlice } from '../systems/effects';
 import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
@@ -43,6 +43,8 @@ interface PlayerStats {
   bamboozledKills: number; // kills while controls inverted -> "Drunken Master"
   bamboozledTime: number; // seconds suffering inverted ctl -> "Most Bamboozled"
   falls: number; // self-eliminations into a pit          -> "Slow Learner"
+  bushTime: number; // seconds spent lurking in cover      -> "Rambo"
+  crushDeaths: number; // times squished by a block        -> "Trash Compactor"
 }
 
 /** A fighter — either the human (idx 0) or a CPU-controlled snack. */
@@ -91,6 +93,12 @@ export class Player {
   spawnFlash!: number;
   bob!: number;
   shieldFlash!: number;
+  disguised!: boolean; // DISGUISE: held still long enough to look like scenery
+  disguiseT!: number; // seconds of stillness accumulated toward disguising
+  propIdx!: number; // which scenery prop we currently masquerade as
+  inBush!: boolean; // standing in leafy cover this frame (bots can't see you)
+  role!: 'seeker' | 'hider' | 'none'; // Hide & Seek assignment
+  attemptsLeft!: number; // Hide & Seek: seeker's finite pool of throws/slashes
 
   constructor(charIdx: number, idx: number, isAI: boolean) {
     this.char = CHARS[charIdx];
@@ -111,6 +119,8 @@ export class Player {
       bamboozledKills: 0,
       bamboozledTime: 0,
       falls: 0,
+      bushTime: 0,
+      crushDeaths: 0,
     };
     this.reset(SPAWNS[idx % SPAWNS.length]);
     this.score = 0;
@@ -154,6 +164,12 @@ export class Player {
     this.spawnFlash = 0.6;
     this.bob = rand(0, TAU);
     this.shieldFlash = 0;
+    this.disguised = false;
+    this.disguiseT = 0;
+    this.propIdx = 0;
+    this.inBush = false;
+    this.role = 'none';
+    this.attemptsLeft = 0;
     this.powers.clear(); // modifiers are lost on death / new round
   }
 
@@ -176,6 +192,14 @@ export class Player {
   /** True while this fighter is hauling the Golden Boomerang. */
   get isGoldCarrier(): boolean {
     return game.golden != null && game.golden.carrier === this;
+  }
+
+  /** Hide & Seek role helpers. */
+  get isSeeker(): boolean {
+    return game.mode === 3 && this.role === 'seeker';
+  }
+  get isHider(): boolean {
+    return game.mode === 3 && this.role === 'hider';
   }
 
   /** Apply a collected power-up, honouring stacking & elemental exclusion. */
@@ -224,6 +248,12 @@ export class Player {
     if (this.bamboozled > 0) {
       this.bamboozled = Math.max(0, this.bamboozled - dt);
       this.stats.bamboozledTime += dt;
+    }
+
+    // rain quickly douses flames — stand in the open and the burn fizzles out
+    if (this.burning > 0 && game.raining) {
+      this.burning = Math.max(0, this.burning - dt * 4);
+      if (this.burning <= 0) spawnRing(this.x, this.y, '#9fd6ff', 0.7);
     }
 
     // burning damage-over-time: lethal once the timer elapses
@@ -314,8 +344,10 @@ export class Player {
       this.stats.dashes++;
     }
 
-    // slash trigger — only while ARMED (mirrors Boomerang Fu's state machine)
-    if (!frozen && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0) {
+    // slash trigger — only while ARMED (mirrors Boomerang Fu's state machine).
+    // A Hide & Seek seeker may only swing while attempts remain.
+    if (!frozen && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0 && (!this.isSeeker || this.attemptsLeft > 0)) {
+      if (this.isSeeker) this.attemptsLeft--;
       this.slashT = SLASH_ACTIVE;
       this.slashCd = this.powers.has('EXTRA') ? SLASH_CD_FAST : SLASH_CD;
       // STAB lunges the fighter forward on the swing — an aggressive gap-closer.
@@ -364,14 +396,26 @@ export class Player {
       this.vy = 0;
     }
     resolveCircleObstacles(this);
+    resolveCrushers(this); // crushing blocks are solid walls while at rest/moving
     resolvePortals(this, dt);
 
-    // bottomless pits: a grounded fighter who stops over one falls out.
-    // Dashing (dashT > 0) carries you across — leap the gap and you live.
-    if (this.dashT <= 0 && inPit(this.x, this.y)) {
-      this.fall();
-      return;
+    // bottomless pits, modulated by the Fall-Protection accessibility setting.
+    if (game.fallProtect === 2) {
+      // Extreme: pits act as solid walls — entry is simply impossible.
+      resolvePitSolids(this);
+    } else {
+      // Gentle: nudge the player back from the lip (danger softened, not gone).
+      if (game.fallProtect === 1) nudgeFromPits(this, dt);
+      // A grounded fighter who stops over a pit falls out; dashing leaps it.
+      if (this.dashT <= 0 && inPit(this.x, this.y)) {
+        this.fall();
+        return;
+      }
     }
+
+    // leafy cover: lurking in a bush hides you from bots and earns "Rambo"
+    this.inBush = inBush(this.x, this.y);
+    if (this.inBush) this.stats.bushTime += dt;
 
     // throw handling
     const telekinetic = this.powers.has('TELEKINESIS');
@@ -406,6 +450,30 @@ export class Player {
     this.steering = false;
     if (telekinetic && this.hasActiveTk()) {
       this.steering = this.isAI ? this.ai.tkSteer > 0 : !!intents.throwHeld;
+    }
+
+    // DISGUISE: hold still and you melt into the scenery as a static prop.
+    // Any movement, attack or charge instantly blows your cover (and bots are
+    // coded never to see through it — see ai.ts targeting). Hide & Seek hiders
+    // get the same behaviour for free once the setup window closes.
+    if ((this.powers.has('DISGUISE') || (this.isHider && game.hsSetup <= 0)) && !frozen) {
+      const moving = !!(intents.move[0] || intents.move[1]) || Math.hypot(this.vx, this.vy) > 26;
+      const acting = !!(intents.slash || intents.dash || intents.throwNow || intents.throwHeld) || this.charging || this.slashT > 0 || this.dashT > 0;
+      if (moving || acting) {
+        if (this.disguised) spawnRing(this.x, this.y, POWERS.DISGUISE.color, 0.9);
+        this.disguised = false;
+        this.disguiseT = 0;
+      } else {
+        this.disguiseT += dt;
+        if (!this.disguised && this.disguiseT > 0.5) {
+          this.disguised = true;
+          this.propIdx = Math.floor(rand(0, 3)) % 3;
+          spawnRing(this.x, this.y, POWERS.DISGUISE.color, 0.9);
+        }
+      }
+    } else {
+      this.disguised = false;
+      this.disguiseT = 0;
     }
   }
 
@@ -453,6 +521,11 @@ export class Player {
   }
 
   doThrow(charge: number): void {
+    // Hide & Seek seeker: each throw spends one of a finite pool of attempts.
+    if (this.isSeeker) {
+      if (this.attemptsLeft <= 0) return;
+      this.attemptsLeft--;
+    }
     charge = clamp(charge, 0.12, 1);
     const [ax, ay] = this.aim;
     const speed = 430 + charge * 230;
@@ -505,6 +578,14 @@ export class Player {
     audio.freeze();
     // route through die() for the shared bookkeeping (death count, GHOST, etc.)
     this.die(null, 0, 0);
+  }
+
+  /** Squished by a kinematic block — an environmental death, no killer. */
+  crush(): void {
+    if (!this.alive || this.invuln > 0) return;
+    game.shake = Math.max(game.shake, 16);
+    this.die(null, 0, -1); // Shield (handled in die) can still save you here
+    if (!this.alive) this.stats.crushDeaths++; // count only an actual squish
   }
 
   die(killer: Player | null, dirx: number, diry: number): void {
@@ -566,6 +647,25 @@ export class Player {
   /* ---- rendering ---- */
   draw(): void {
     if (!this.alive) return;
+
+    // DISGUISE: render as inert scenery, hiding all the usual fighter tells.
+    // The human keeps a faint coloured pulse so they can still find themselves.
+    if (this.disguised) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      drawProp(this.propIdx, this.r + 2);
+      if (!this.isAI) {
+        ctx.globalAlpha = 0.25 + 0.15 * Math.sin(game.time * 6);
+        ctx.strokeStyle = POWERS.DISGUISE.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.r + 6, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+
     const bobY = Math.sin(this.bob) * 1.8;
     // shadow
     ctx.fillStyle = 'rgba(0,0,0,.28)';
@@ -603,6 +703,8 @@ export class Player {
     }
     // invuln flicker
     if (this.invuln > 0 && Math.floor(game.time * 20) % 2 === 0) ctx.globalAlpha = 0.55;
+    // lurking in foliage fades the fighter into the leaves
+    if (this.inBush) ctx.globalAlpha *= 0.45;
 
     this.char.draw(this.char, this.r, this.aim);
 

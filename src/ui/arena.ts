@@ -1,6 +1,6 @@
 import { ctx } from '../core/canvas';
 import { W, H, WALL } from '../constants';
-import { arena, OBSTACLES, PITS, PORTALS } from '../data/arena';
+import { arena, OBSTACLES, PITS, PORTALS, BUSHES } from '../data/arena';
 import { game } from '../game/state';
 import { roundRectPath } from '../gfx/shapes';
 import { TAU } from '../core/math';
@@ -71,6 +71,41 @@ export function drawArena(): void {
   ctx.strokeStyle = arena.accent;
   ctx.lineWidth = 4;
   ctx.strokeRect(WALL - 2, WALL - 2, W - (WALL - 2) * 2, H - (WALL - 2) * 2);
+
+  // bushes — leafy cover zones (drawn under fighters; hiding dims the fighter)
+  for (const B of BUSHES) {
+    const cx = B.x + B.w / 2;
+    const cy = B.y + B.h / 2;
+    ctx.save();
+    ctx.fillStyle = 'rgba(46,82,38,.85)';
+    const blobs = 7;
+    for (let i = 0; i < blobs; i++) {
+      const a = (i / blobs) * TAU;
+      const rx = cx + Math.cos(a) * B.w * 0.32;
+      const ry = cy + Math.sin(a) * B.h * 0.32;
+      ctx.beginPath();
+      ctx.arc(rx, ry, B.w * 0.3, 0, TAU);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(78,128,56,.92)';
+    for (let i = 0; i < blobs; i++) {
+      const a = (i / blobs) * TAU + 0.4 + Math.sin(game.time * 1.3 + i) * 0.04;
+      const rx = cx + Math.cos(a) * B.w * 0.24;
+      const ry = cy + Math.sin(a) * B.h * 0.22;
+      ctx.beginPath();
+      ctx.arc(rx, ry, B.w * 0.26, 0, TAU);
+      ctx.fill();
+    }
+    // a few brighter leaf highlights
+    ctx.fillStyle = 'rgba(120,170,80,.5)';
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * TAU + 1.1;
+      ctx.beginPath();
+      ctx.ellipse(cx + Math.cos(a) * B.w * 0.18, cy + Math.sin(a) * B.h * 0.16, B.w * 0.1, B.h * 0.06, a, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 
   // obstacles (diner counters)
   for (const R of OBSTACLES) {
