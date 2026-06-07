@@ -299,6 +299,7 @@ export class Player {
       if (this.airT <= 0) {
         this.jumpZ = 0;
         this.invuln = Math.max(this.invuln, 0.12); // brief landing grace
+        spawnDashPuff(this.x, this.y, this.aim, this.char.body); // touchdown puff
       }
     }
 

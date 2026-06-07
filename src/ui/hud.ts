@@ -113,6 +113,15 @@ export function drawHUD(): void {
         (seeker ? seeker.attemptsLeft : 0);
   } else banner = 'ROUND ' + game.roundNum + '  ·  first to ' + game.target;
   ctx.fillText(banner, W / 2, 62);
+
+  // Battle Royale warning: a pulsing call to reach the closing safe ring
+  if (game.br) {
+    const left = Math.max(0, game.br.dur - game.br.t);
+    ctx.fillStyle = `rgba(255,93,108,${0.7 + 0.3 * Math.sin(game.time * 8)})`;
+    ctx.font = '900 16px "Trebuchet MS"';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚠ BATTLE ROYALE · reach the ring · ' + Math.ceil(left) + 's', W / 2, 84);
+  }
 }
 
 /** Big stroked headline with optional sub-line, centered on screen. */
