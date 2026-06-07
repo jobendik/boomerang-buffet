@@ -29,28 +29,43 @@ is the bar.
 
 ## Architecture cheat-sheet (read before editing)
 
-- **`src/game/state.ts`** — the single mutable `game` object. `game.state`
-  (`menu|countdown|playing|roundover|matchover`), `game.mode` (0 FFA / 1 Team Up
-  / 2 Golden), `game.golden`, `game.arenaSel`, timers, arrays of entities.
-- **`src/game/update.ts`** — per-frame sim step + human input → `Intents`.
-- **`src/game/flow.ts`** — match/round lifecycle, team assignment, pickup spawn,
-  economy decay, `endRoundCheck` (mode-aware win conditions).
+- **`src/game/state.ts`** — the single mutable `game` object + its interfaces
+  (`Decoy`, `SwitchState`, `GateState`, `BattleRoyale`, `Golden`, `Hazard`).
+  `game.state` (`menu|countdown|playing|roundover|matchover`), `game.mode`
+  (0 FFA / 1 Team Up / 2 Golden / **3 Hide & Seek**), `game.golden`, `game.br`
+  (Battle Royale event), `game.fallProtect`, `game.arenaSel`, timers, and the
+  entity arrays (`players`, `boomerangs`, `pickups`, `particles`, `hazards`,
+  `crushers`, `decoys`, `switches`, `gates`, `hsDecoys`).
+- **`src/game/update.ts`** — per-frame sim step + human input → `Intents`. Also
+  hosts the global per-frame helpers `updateGolden` and `updateBattleRoyale`.
+- **`src/game/flow.ts`** — match/round lifecycle, team assignment, Hide & Seek
+  setup, pickup spawn, economy decay, `endRoundCheck` (mode-aware win
+  conditions). Rebuilds per-arena runtime (crushers/switches/gates) in
+  `startRound`.
 - **`src/data/arena.ts`** — `ARENAS[]` + **live bindings** `OBSTACLES`, `SPAWNS`,
-  `PITS`, `PORTALS`, `arena`, reassigned by `setArena(i)`. Importers read these
-  by name and transparently see the active arena. **Add new hazard arrays here.**
-- **`src/data/powers.ts`** — `POWERS` map, `POWER_KEYS`, `ELEMENTAL_EXCLUSIVE`,
-  `NEVER_FIRST`. New powers: add here, then handle in `Player.applyPower` and
-  wherever the effect lives.
-- **`src/data/characters.ts`** — 9 procedural fighters (`CHARS`). Add a `drawX`
-  fn + a `CHARS` entry.
-- **`src/entities/`** — `Player`, `Boomerang`, `FirePatch`, `Pickup`, `Particle`.
-  Hazards live in `game.hazards` and must expose `update(dt): boolean` + `draw()`.
-- **`src/systems/collision.ts`** — geometry + all damage resolution, plus
-  `resolvePlayerCollisions`, `spreadFire`, `inPit`, `resolvePortals`.
-- **`src/systems/ai.ts`** — bot behaviour (targeting, kiting, dodging, pit/hazard
-  avoidance).
-- **`src/ui/`** — `arena` (backdrop+hazards), `world` (play-field), `hud`,
-  `menu` (title + selectors + match-over).
+  `PITS`, `BUSHES`, `CRUSHERS`, `PORTALS`, `SWITCHES`, `GATES`, `arena`,
+  reassigned by `setArena(i)`. Importers read these by name and transparently
+  see the active arena. **Add new arena-scoped arrays here** (+ a field on the
+  `Arena` type in `types.ts`, with an entry — even if `[]` — on every arena).
+- **`src/data/powers.ts`** — `POWERS` map, `POWER_KEYS`, `EXCLUSIVE_GROUPS`
+  (Fire/Ice, HotFeet/CoolWalk), `NEVER_FIRST` (Bamboozle/WeakArm/Battle). New
+  powers: add here, then handle in `Player.applyPower` and wherever the effect
+  lives.
+- **`src/data/characters.ts`** — 12 procedural fighters (`CHARS`). Add a `drawX`
+  fn + a `CHARS` entry (`eyes()`/`mouthSmile()` helpers are shared).
+- **`src/entities/`** — `Player`, `Boomerang`, `Pickup`, `Particle`, and the
+  hazards `FirePatch` / `IcePatch`, plus the `Crusher` block. Hazards live in
+  `game.hazards` and must expose `update(dt): boolean` + `draw()`.
+- **`src/systems/collision.ts`** — geometry + all damage resolution:
+  `resolveBoomerangHits`, `resolveSlashes`, `resolvePlayerCollisions`,
+  `resolveDecoyHits`, `spreadFire`, `updateSwitches`, plus the solid/limit
+  helpers `resolveCircleObstacles`, `resolveCrushers`, `resolveGates`,
+  `resolvePitSolids`, `nudgeFromPits`, `inPit`, `inBush`, `resolvePortals`.
+- **`src/systems/ai.ts`** — bot behaviour (targeting, decoy-attraction, kiting,
+  dodging/hopping, pit/hazard/crusher/gate/Battle-Royale avoidance).
+- **`src/ui/`** — `arena` (backdrop + hazards/switches/gates), `world`
+  (play-field + decoys + Battle-Royale overlay + weather), `hud` (scoreboard +
+  banners), `menu` (title + selectors + match-over awards).
 
 ### Conventions you MUST follow
 1. **Friendly fire goes through `Player.isEnemy(other)`.** Every new damage
@@ -63,8 +78,15 @@ is the bar.
 3. **Arena-scoped data uses the live-binding pattern** in `arena.ts` (don't read
    it at module top-level; read inside functions so reassignment is visible).
 4. **Powers** that persist live in `Player.powers: Set<PowerKey>`; timed
-   afflictions (like `BAMBOOZLE`) live as a numeric timer field instead.
-5. Keep comment density / naming consistent with surrounding code.
+   afflictions (`BAMBOOZLE`) and one-shot global events (`BATTLE` → `game.br`)
+   are handled specially in `applyPower` (early-return, never added to the set).
+5. **Damage immunity reuses `invuln`.** Anything that should dodge attacks tops
+   up `Player.invuln` each frame (e.g. the jump keeps `invuln ≥ airT`), so every
+   existing `invuln > 0` guard at the damage sites skips it — don't add new
+   per-site flags. `die()` itself ignores `invuln` (the call sites gate it); its
+   only bypasses are `SHIELD`, `DELAYED` (non-`environmental` hits) and the
+   `environmental` flag (pits/crushers/Battle-Royale border skip `DELAYED`).
+6. Keep comment density / naming consistent with surrounding code.
 
 ### Current feature inventory (already done)
 Armed/unarmed state machine · clash/parry · charged curve throws ·
@@ -217,29 +239,61 @@ These slot into the existing power architecture cleanly (`powers.ts` +
 ---
 
 ## Known limitations / cleanups
+- **Balance is playtest-unverified.** The newer systems were built build-clean
+  but never tuned against real play. Watch especially: jump immunity uptime
+  (0.5s air / 0.85s `JUMP_CD`), Battle Royale `shrink` (8.5s) / `rMin` (118px) /
+  `dur` (13s) and its full initiator+ally immunity, and Decoy's 2-clone cap.
+- **HUD power-icon row can overflow.** The right-aligned icons in each scoreboard
+  card step 15px leftward from `cardW-8`; a deep stack (~8+ powers) collides with
+  the name/score. Could wrap to a second row or shrink the glyphs.
 - Soft player-vs-player collision can nudge a fighter slightly into a wall for a
   frame (corrected next frame by obstacle resolve). Fine for a party game.
 - Golden-carrier still shows power auras even though throws ignore them
   (cosmetic).
 - `pickupSpawnChance` decay is global on the lead player's power count; could be
   per-player as in the source.
+- `Boomerang.update` rebuilds a `solids` array (obstacles + open-gate filter)
+  every frame per boomerang on gated arenas — cheap, but cache it per-frame if a
+  hot path ever needs it.
+- Switches/gates and crushers/portals are only placed in a couple of arenas;
+  Grove is deliberately hazard-light. More arenas could exercise them.
+- The jump and Battle Royale reuse `audio.dash()` / `audio.power()`; distinct
+  SFX would read better.
 - Line-endings: repo mixes LF/CRLF on Windows (git warns, harmless).
 
 ---
 
-## Suggested order for a fresh chat
-All four P1 features (Hide & Seek, Crushers + rain, Bushes + Rambo,
-Fall-Protection), the Disguise/Cool Walk/Weak Arm powers, the elemental stacking
-matrix, the remaining P2 powers (**Decoy / Delayed Death / Phase Dash**) and
-**Multi + Bomb** are ✅ done. Remaining, easiest first:
+## Status: P1–P3 essentially complete
 
-1. **More awards** (P3) — Vengeful Ghost ✅, Most Enthusiastic ✅ and
-   Switcheroo ✅ (+ its floor-switch mechanic) all done.
-2. **More content** (P3) — 12 fighters ✅ + the Grove arena ✅ done. Remaining:
-   per-arena music/ambience synths, and yet more arenas if desired.
-3. **Battle Royale** power ✅ and **vertical dodge/jump** ✅ done — the P3
-   larger systems are complete. Remaining odds & ends: local multiplayer /
-   controllers (the big one), Golden time-dilation polish, per-arena ambience
-   synths, more arenas/characters.
+Every P1 feature, every P2 power + the full stacking matrix, and every P3
+"larger system" except **local multiplayer** is now implemented. The roadmap
+above is a record; the live backlog is below.
+
+## Remaining backlog (roughly easiest → hardest)
+
+1. **Playtest & tune.** The single highest-value next step — boot `npm run dev`
+   and tune the unverified knobs (jump, Battle Royale, Decoy; see Known
+   limitations). No code spelunking required, just numbers.
+2. **Audio polish** — distinct jump/landing + Battle-Royale SFX; per-arena
+   ambience/music synths keyed off the biome (Diner/Pitfall/Crossfire/Grove).
+3. **Golden time-dilation** — brief slow-mo (scale `dt`) when the Golden carrier
+   scores a kill (blueprint's cinematic beat). Dynamic hold-time already scales.
+4. **HUD power-icon overflow fix** — wrap/shrink the stacked-icon row (see Known
+   limitations) so deep stacks stay readable.
+5. **More content** — more arenas that exercise switches/gates/crushers/portals;
+   more fighters toward the source's wider roster; the "taller models peek from
+   cover" Hide & Seek flavour.
+6. **Fidelity refinements from the blueprint** — Teleport targeting the
+   *first-thrown* boomerang (currently nearest main); velocity-perfect portal
+   feel + FX; Decoys inheriting Caffeine speed / drifting; bot teammate revives
+   in Team Up (no revive system exists yet).
+7. **Settings persistence** — remember menu selections (mode/arena/skill/etc.)
+   in `localStorage`.
+8. **A headless smoke test** — the canvas can't be tested, but the pure logic
+   (`isEnemy`, `computeAwards`, `pickupSpawnChance`, elemental exclusion) could
+   get a tiny jsdom/node test to guard regressions in CI.
+9. **Local multiplayer / controllers** (the big one) — multiple human players via
+   the Gamepad API, per-player input + menu player-config. Touches input, the
+   player-build path, and the menu; the source's whole point but a major lift.
 
 Branch per feature, `npm run build` gate, keep `isEnemy`/telemetry conventions.
