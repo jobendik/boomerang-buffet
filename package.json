@@ -1,0 +1,17 @@
+{
+  "name": "boomerang-buffet",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "An original arena brawler homage to the boomerang party-fighter genre.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7"
+  }
+}

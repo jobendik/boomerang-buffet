@@ -1,0 +1,176 @@
+import { clamp, dist, dist2, lerp, norm, rand } from '../core/math';
+import { OBSTACLES } from '../data/arena';
+import { game } from '../game/state';
+import type { Intents } from '../types';
+import type { Player } from '../entities/Player';
+
+/** CPU fighter behaviour: targeting, kiting, pickup-seeking and dodging. */
+
+function lineHitsObstacle(x1: number, y1: number, x2: number, y2: number): boolean {
+  // coarse: sample
+  const steps = 12;
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const px = lerp(x1, x2, t);
+    const py = lerp(y1, y2, t);
+    for (const R of OBSTACLES) {
+      if (px > R.x - 4 && px < R.x + R.w + 4 && py > R.y - 4 && py < R.y + R.h + 4) return true;
+    }
+  }
+  return false;
+}
+
+export function aiThink(p: Player, dt: number): Intents {
+  const a = p.ai;
+  a.tThink -= dt;
+  a.tThrow -= dt;
+  a.tStrafe -= dt;
+  // pick target = nearest alive enemy
+  let best: Player | null = null;
+  let bd = Infinity;
+  for (const q of game.players) {
+    if (q !== p && q.alive) {
+      const d = dist2(p.x, p.y, q.x, q.y);
+      if (d < bd) {
+        bd = d;
+        best = q;
+      }
+    }
+  }
+  a.target = best;
+  const intents: Intents = {
+    move: [0, 0],
+    aimX: p.aim[0],
+    aimY: p.aim[1],
+    throwNow: false,
+    charge: 0.6,
+    dash: false,
+    slash: false,
+  };
+  if (a.tStrafe <= 0) {
+    a.strafe = Math.random() < 0.5 ? 1 : -1;
+    a.tStrafe = rand(0.6, 1.4);
+  }
+
+  // seek nearby pickup if free and have boomerang
+  let pick = null;
+  let pd = 9e9;
+  for (const pk of game.pickups) {
+    const d = dist2(p.x, p.y, pk.x, pk.y);
+    if (d < pd) {
+      pd = d;
+      pick = pk;
+    }
+  }
+
+  let mvx = 0;
+  let mvy = 0;
+  if (best) {
+    const d = Math.sqrt(bd);
+    const [tx, ty] = norm(best.x - p.x, best.y - p.y);
+    // aim with lead
+    const lead = 0.12;
+    const ax = best.x + best.vx * lead;
+    const ay = best.y + best.vy * lead;
+    const aim = norm(ax - p.x, ay - p.y);
+    intents.aimX = aim[0];
+    intents.aimY = aim[1];
+
+    const idealDist = 240;
+    if (pick && Math.sqrt(pd) < 260 && p.powers.size < 3) {
+      const [gx, gy] = norm(pick.x - p.x, pick.y - p.y);
+      mvx = gx;
+      mvy = gy;
+    } else {
+      if (d > idealDist + 40) {
+        mvx += tx;
+        mvy += ty;
+      } else if (d < idealDist - 60) {
+        mvx -= tx;
+        mvy -= ty;
+      }
+      // strafe
+      mvx += -ty * a.strafe * 0.9;
+      mvy += tx * a.strafe * 0.9;
+    }
+
+    // point-blank melee slash (faster than a throw, so prefer it up close)
+    if (p.armed && p.slashCd <= 0 && d < p.r + best.r + 30) {
+      intents.slash = true;
+    }
+
+    // throw decision
+    if (p.hasBoomerang && a.tThrow <= 0 && d < 460 && !lineHitsObstacle(p.x, p.y, best.x, best.y)) {
+      const facing = norm(intents.aimX, intents.aimY);
+      const dot = facing[0] * tx + facing[1] * ty;
+      if (dot > 0.6 || d < 200) {
+        intents.throwNow = true;
+        intents.charge = clamp(d / 460 + rand(-0.1, 0.2), 0.2, 1);
+        a.tThrow = rand(0.55, 1.3);
+      }
+    }
+  } else {
+    // wander
+    mvx = Math.cos(p.bob * 0.3);
+    mvy = Math.sin(p.bob * 0.27);
+  }
+
+  // dodge incoming enemy boomerangs / hazards
+  let danger = null;
+  let ddist = 9e9;
+  let dangerVec: [number, number] = [0, 0];
+  for (const b of game.boomerangs) {
+    if (b.origOwner === p || b.dead) continue;
+    const d = dist(b.x, b.y, p.x, p.y);
+    if (d < 150) {
+      const toMe = norm(p.x - b.x, p.y - b.y);
+      const bv = norm(b.vx, b.vy);
+      const approaching = bv[0] * toMe[0] + bv[1] * toMe[1];
+      if (approaching > 0.4 && d < ddist) {
+        ddist = d;
+        danger = b;
+        dangerVec = toMe;
+      }
+    }
+  }
+  if (danger) {
+    // slash to clash if close, armed & facing; else dash perpendicular
+    const facing = norm(intents.aimX, intents.aimY);
+    const toBoom = norm(danger.x - p.x, danger.y - p.y);
+    if (
+      ddist < 60 &&
+      p.armed &&
+      p.slashCd <= 0 &&
+      facing[0] * toBoom[0] + facing[1] * toBoom[1] > 0.2 &&
+      Math.random() < 0.5 + game.difficulty * 0.2
+    ) {
+      intents.slash = true;
+      intents.aimX = toBoom[0];
+      intents.aimY = toBoom[1];
+    } else if (p.dashCd <= 0 && ddist < 110) {
+      // dash perpendicular to incoming
+      const perp = [-dangerVec[1], dangerVec[0]];
+      const side = Math.random() < 0.5 ? 1 : -1;
+      mvx = perp[0] * side;
+      mvy = perp[1] * side;
+      intents.dash = true;
+    } else {
+      mvx += dangerVec[0];
+      mvy += dangerVec[1];
+    }
+  }
+
+  // avoid hazards
+  for (const hz of game.hazards) {
+    const d = dist(hz.x, hz.y, p.x, p.y);
+    if (d < 60) {
+      const [ax, ay] = norm(p.x - hz.x, p.y - hz.y);
+      mvx += ax * 1.5;
+      mvy += ay * 1.5;
+    }
+  }
+
+  const n = norm(mvx, mvy);
+  intents.move = mvx || mvy ? n : [0, 0];
+  return intents;
+}
