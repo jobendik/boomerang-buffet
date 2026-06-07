@@ -7,9 +7,11 @@ import { SPAWNS } from '../data/arena';
 import { POWERS, ELEMENTAL_EXCLUSIVE, type PowerKey } from '../data/powers';
 import { drawBoomShape, roundRectPath } from '../gfx/shapes';
 import { resolveCircleObstacles } from '../systems/collision';
-import { spawnDashPuff, spawnRing, spawnSlice } from '../systems/effects';
+import { spawnDashPuff, spawnExplosion, spawnRing, spawnSlice } from '../systems/effects';
 import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
+import { Particle } from './Particle';
+import { FirePatch } from './FirePatch';
 import type { Char, Intents, Spawn, Vec2 } from '../types';
 
 /* ----------------------------- tuning constants -------------------------- */
@@ -34,6 +36,11 @@ interface PlayerStats {
   deaths: number;
   kills: number;
   unarmedTime: number;
+  frozenKills: number; // foes finished off while frozen  -> "Ice Breaker"
+  burnKills: number; // foes burned to death              -> "Pyromaniac"
+  bombSelfKills: number; // blown up by your own bomb      -> "Short Fuse"
+  bamboozledKills: number; // kills while controls inverted -> "Drunken Master"
+  bamboozledTime: number; // seconds suffering inverted ctl -> "Most Bamboozled"
 }
 
 /** A fighter — either the human (idx 0) or a CPU-controlled snack. */
@@ -71,6 +78,10 @@ export class Player {
   slashT!: number;
   slashCd!: number;
   frozen!: number;
+  burning!: number; // remaining seconds before the burn turns lethal
+  burnSource!: Player | null; // who gets credit if the burn kills us
+  bamboozled!: number; // remaining seconds of inverted controls
+  trailT!: number; // HOT FEET footprint cadence
   spawnFlash!: number;
   bob!: number;
   shieldFlash!: number;
@@ -82,7 +93,18 @@ export class Player {
     this.isAI = isAI;
     this.r = 17;
     this.powers = new Set();
-    this.stats = { dashes: 0, clashes: 0, deaths: 0, kills: 0, unarmedTime: 0 };
+    this.stats = {
+      dashes: 0,
+      clashes: 0,
+      deaths: 0,
+      kills: 0,
+      unarmedTime: 0,
+      frozenKills: 0,
+      burnKills: 0,
+      bombSelfKills: 0,
+      bamboozledKills: 0,
+      bamboozledTime: 0,
+    };
     this.reset(SPAWNS[idx % SPAWNS.length]);
     this.score = 0;
     this.aim = [1, 0];
@@ -113,6 +135,10 @@ export class Player {
     this.slashT = 0;
     this.slashCd = 0;
     this.frozen = 0;
+    this.burning = 0;
+    this.burnSource = null;
+    this.bamboozled = 0;
+    this.trailT = 0;
     this.spawnFlash = 0.6;
     this.bob = rand(0, TAU);
     this.shieldFlash = 0;
@@ -129,6 +155,11 @@ export class Player {
 
   /** Apply a collected power-up, honouring stacking & elemental exclusion. */
   applyPower(type: PowerKey): void {
+    // BAMBOOZLE is an anti-powerup: a timed affliction, not a kept modifier.
+    if (type === 'BAMBOOZLE') {
+      this.bamboozled = Math.max(this.bamboozled, 9);
+      return;
+    }
     // Fire / Ice are mutually exclusive — taking one drops the other.
     if (ELEMENTAL_EXCLUSIVE.includes(type)) {
       for (const e of ELEMENTAL_EXCLUSIVE) if (e !== type) this.powers.delete(e);
@@ -138,6 +169,15 @@ export class Player {
       this.boomsMax = 2;
       this.boomsInHand = Math.min(this.boomsMax, this.boomsInHand + 1);
     }
+  }
+
+  /** Set this fighter alight — a contagious damage-over-time that, left
+   *  unattended, becomes lethal. Dashing (see `update`) stamps it out. */
+  ignite(source: Player | null): void {
+    if (!this.alive || this.invuln > 0) return;
+    if (this.burning <= 0) audio.tick();
+    this.burning = Math.max(this.burning, 1.7);
+    this.burnSource = source && source.alive ? source : this.burnSource;
   }
 
   /* intents are set by human input or AI before update */
@@ -155,6 +195,29 @@ export class Player {
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
     if (this.frozen > 0) this.frozen = Math.max(0, this.frozen - dt);
 
+    // inverted-controls affliction (telemetry feeds the Drunken/Bamboozled awards)
+    if (this.bamboozled > 0) {
+      this.bamboozled = Math.max(0, this.bamboozled - dt);
+      this.stats.bamboozledTime += dt;
+    }
+
+    // burning damage-over-time: lethal once the timer elapses
+    if (this.burning > 0) {
+      this.burning -= dt;
+      if (Math.random() < 0.7) {
+        game.particles.push(
+          new Particle(this.x + rand(-8, 8), this.y + rand(-10, 4), rand(-12, 12), rand(-50, -20), rand(0.25, 0.5), Math.random() < 0.5 ? '#ffce54' : '#ff7b3a', rand(2, 5))
+        );
+      }
+      if (this.burning <= 0) {
+        const src = this.burnSource;
+        if (src && src !== this) src.stats.burnKills++;
+        const dir: Vec2 = [rand(-1, 1), rand(-1, 1)];
+        this.die(src, dir[0], dir[1]);
+        return;
+      }
+    }
+
     // boomerang respawns (lost boomerangs return to hand after a delay)
     if (this.respawns.length) {
       for (let i = this.respawns.length - 1; i >= 0; i--) {
@@ -171,6 +234,10 @@ export class Player {
 
     const frozen = this.frozen > 0;
     const caffeinated = this.powers.has('SPEED');
+
+    // BAMBOOZLE inverts the movement vector (aim is untouched, so you can still
+    // point your throws — the chaos is purely in getting where you intend).
+    if (this.bamboozled > 0) intents.move = [-intents.move[0], -intents.move[1]];
 
     // aim
     if (!frozen) this.aim = norm(intents.aimX, intents.aimY);
@@ -192,6 +259,13 @@ export class Player {
       this.vy = lerp(this.vy, goal[1], 1 - Math.pow(0.0009, dt));
     }
 
+    // frozen fighters mash dash to crack the ice apart and break free early
+    if (frozen && intents.dash) {
+      this.frozen = Math.max(0, this.frozen - 0.32);
+      if (Math.random() < 0.4) audio.tick();
+      if (this.frozen <= 0) spawnRing(this.x, this.y, '#bdf0ff', 1.0);
+    }
+
     // dash / teleport trigger
     if (!frozen && intents.dash && this.dashCd <= 0 && this.dashT <= 0) {
       if (this.powers.has('TELEPORT') && this.tryTeleport()) {
@@ -206,6 +280,11 @@ export class Player {
         audio.dash();
         spawnDashPuff(this.x, this.y, d, this.char.body);
       }
+      // a quick dash beats out flames (Caffeine's reset enables rapid stomping)
+      if (this.burning > 0) {
+        this.burning = 0;
+        spawnRing(this.x, this.y, '#9fd6ff', 0.8);
+      }
       this.stats.dashes++;
     }
 
@@ -213,7 +292,24 @@ export class Player {
     if (!frozen && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0) {
       this.slashT = SLASH_ACTIVE;
       this.slashCd = this.powers.has('EXTRA') ? SLASH_CD_FAST : SLASH_CD;
+      // STAB lunges the fighter forward on the swing — an aggressive gap-closer.
+      if (this.powers.has('STAB')) {
+        this.vx = this.aim[0] * 560;
+        this.vy = this.aim[1] * 560;
+        this.dashT = Math.max(this.dashT, 0.13);
+        this.invuln = Math.max(this.invuln, 0.1);
+        spawnDashPuff(this.x, this.y, this.aim, POWERS.STAB.color);
+      }
       audio.dash();
+    }
+
+    // HOT FEET: scorch a fiery trail while moving at speed
+    if (this.powers.has('HOTFEET') && !frozen) {
+      this.trailT -= dt;
+      if (this.trailT <= 0 && Math.hypot(this.vx, this.vy) > 120) {
+        this.trailT = 0.1;
+        game.hazards.push(new FirePatch(this.x, this.y, this));
+      }
     }
 
     // friction during dash decay
@@ -290,6 +386,14 @@ export class Player {
     this.dashCd = this.powers.has('SPEED') ? 0.22 : 0.7;
     spawnRing(this.x, this.y, '#8affd6', 1.2);
     audio.catch_();
+    // squash-kill: warping straight onto a foe crushes them flat
+    for (const q of game.players) {
+      if (q === this || !q.alive || q.invuln > 0) continue;
+      if (dist(this.x, this.y, q.x, q.y) < this.r + q.r) {
+        const [dx, dy] = norm(q.x - this.x, q.y - this.y);
+        q.die(this, dx, dy);
+      }
+    }
     return true;
   }
 
@@ -306,6 +410,7 @@ export class Player {
     main.ice = this.powers.has('ICE');
     main.bomb = this.powers.has('BOMB');
     main.multi = this.powers.has('MULTI');
+    main.unstoppable = this.powers.has('UNSTOPPABLE');
     game.boomerangs.push(main);
     this.boomsInHand--;
     audio.throw_();
@@ -339,13 +444,36 @@ export class Player {
       spawnRing(this.x, this.y, POWERS.SHIELD.color, 1.3);
       return;
     }
+    const wasFrozen = this.frozen > 0;
     this.alive = false;
     this.stats.deaths++;
-    if (killer && killer !== this) killer.stats.kills++;
+    if (killer && killer !== this) {
+      killer.stats.kills++;
+      if (wasFrozen) killer.stats.frozenKills++; // "Ice Breaker"
+      if (killer.bamboozled > 0) killer.stats.bamboozledKills++; // "Drunken Master"
+    }
+    this.burning = 0;
+    this.frozen = 0;
     audio.slice();
     spawnSlice(this.x, this.y, this.char, dirx, diry);
     game.shake = Math.max(game.shake, 14);
     game.hitstop = Math.max(game.hitstop, 0.09);
+
+    // OUT WITH A BANG: detonate on death, taking nearby foes with you.
+    // `alive` is already false, so the blast can't recursively re-kill us.
+    if (this.powers.has('GHOST')) {
+      audio.bomb();
+      spawnExplosion(this.x, this.y);
+      game.shake = Math.max(game.shake, 16);
+      const R = 84;
+      for (const q of game.players) {
+        if (q === this || !q.alive || q.invuln > 0) continue;
+        if (dist(this.x, this.y, q.x, q.y) < R + q.r) {
+          const [dx, dy] = norm(q.x - this.x, q.y - this.y);
+          q.die(this, dx, dy);
+        }
+      }
+    }
   }
 
   /* ---- rendering ---- */
@@ -404,6 +532,33 @@ export class Player {
       ctx.strokeStyle = `rgba(180,240,255,${0.5 * k})`;
       ctx.lineWidth = 2;
       ctx.stroke();
+    }
+    // burning glow (the fiery particles themselves come from update())
+    if (this.burning > 0) {
+      ctx.save();
+      const fa = 0.35 + 0.2 * Math.sin(game.time * 22);
+      const g = ctx.createRadialGradient(0, 0, this.r * 0.4, 0, 0, this.r + 12);
+      g.addColorStop(0, `rgba(255,170,40,${fa})`);
+      g.addColorStop(1, 'rgba(255,60,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r + 12, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+    // bamboozled: dizzy spinning marks orbiting the head
+    if (this.bamboozled > 0) {
+      ctx.save();
+      ctx.fillStyle = POWERS.BAMBOOZLE.color;
+      ctx.font = '900 12px "Trebuchet MS"';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i < 3; i++) {
+        const a = game.time * 7 + (i * TAU) / 3;
+        ctx.globalAlpha = 0.6 + 0.4 * Math.sin(a);
+        ctx.fillText('?', Math.cos(a) * (this.r + 6), -this.r - 6 + Math.sin(a) * 3);
+      }
+      ctx.restore();
     }
     // frozen overlay
     if (this.frozen > 0) {

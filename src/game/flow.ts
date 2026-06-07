@@ -2,7 +2,7 @@ import { audio } from '../core/audio';
 import { dist, rand, randi } from '../core/math';
 import { BOUNDS } from '../constants';
 import { OBSTACLES, SPAWNS } from '../data/arena';
-import { POWER_KEYS } from '../data/powers';
+import { POWER_KEYS, NEVER_FIRST } from '../data/powers';
 import { Player } from '../entities/Player';
 import { Pickup } from '../entities/Pickup';
 import { game } from './state';
@@ -26,6 +26,7 @@ export function startMatch(): void {
   game.roundNum = 0;
   game.matchWinner = null;
   game.roundWinner = null;
+  game.pickupsSpawned = 0;
   for (const p of game.players) p.score = 0;
   startRound();
 }
@@ -72,7 +73,10 @@ export function pickupSpawnChance(): number {
 }
 
 export function spawnPickup(): void {
-  const type = POWER_KEYS[randi(0, POWER_KEYS.length - 1)];
+  // some books (e.g. the BAMBOOZLE anti-power) are barred from being the very
+  // first of a match, so a fresh player isn't blindsided by mystery controls
+  const pool = game.pickupsSpawned === 0 ? POWER_KEYS.filter((k) => !NEVER_FIRST.includes(k)) : POWER_KEYS;
+  const type = pool[randi(0, pool.length - 1)];
   // find free location
   for (let tries = 0; tries < 30; tries++) {
     const x = rand(BOUNDS.l + 50, BOUNDS.r - 50);
@@ -85,6 +89,7 @@ export function spawnPickup(): void {
     for (const pk of game.pickups) if (dist(x, y, pk.x, pk.y) < 80) ok = false;
     if (ok) {
       game.pickups.push(new Pickup(x, y, type));
+      game.pickupsSpawned++;
       return;
     }
   }

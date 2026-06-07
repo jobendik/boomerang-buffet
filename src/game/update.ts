@@ -1,7 +1,7 @@
 import { norm, rand } from '../core/math';
 import { keys, mouse } from '../core/input';
 import { aiThink } from '../systems/ai';
-import { resolveBoomerangHits, resolveSlashes } from '../systems/collision';
+import { resolveBoomerangHits, resolvePlayerCollisions, resolveSlashes, spreadFire } from '../systems/collision';
 import { game } from './state';
 import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
 import type { Intents } from '../types';
@@ -61,6 +61,8 @@ export function update(dt: number): void {
       const intents = p.isAI ? aiThink(p, dt) : humanIntents(p);
       p.update(dt, intents);
     }
+    resolvePlayerCollisions(); // soft separation + frozen-shatter-on-bump
+    spreadFire(); // burning fighters ignite their neighbours
     // boomerangs
     for (const b of game.boomerangs) b.update(dt);
     resolveBoomerangHits();

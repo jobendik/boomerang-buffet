@@ -170,6 +170,11 @@ export function aiThink(p: Player, dt: number): Intents {
     }
   }
 
+  // frozen solid: mash dash to crack free (bots, unlike fire, do fight the ice).
+  // NB: deliberately no fire-extinguish here — clustered bots cascade-burn,
+  // exactly the exploitable flaw the source AI is known for.
+  if (p.frozen > 0) intents.dash = true;
+
   const n = norm(mvx, mvy);
   intents.move = mvx || mvy ? n : [0, 0];
   return intents;

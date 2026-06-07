@@ -86,13 +86,15 @@ export function resolveBoomerangHits(): void {
           b.explode();
           break;
         }
-        if (b.ice) {
-          if (p.frozen > 0) {
-            const [dx, dy] = norm(p.x - b.x, p.y - b.y);
-            p.die(b.origOwner, dx, dy);
-          } else {
-            p.freeze();
-          }
+        if (p.frozen > 0) {
+          // a frozen fighter is brittle glass: ANY contact shatters them
+          const [dx, dy] = norm(b.vx, b.vy);
+          p.die(b.origOwner, dx, dy);
+        } else if (b.ice) {
+          p.freeze();
+        } else if (b.fire) {
+          // fire doesn't slice — it sets the target alight (a spreading DOT)
+          p.ignite(b.origOwner);
         } else {
           const [dx, dy] = norm(b.vx, b.vy);
           p.die(b.origOwner, dx, dy);
@@ -135,6 +137,7 @@ export function resolveSlashes(): void {
             b.explode();
             continue;
           }
+          if (b.unstoppable) continue; // UNSTOPPABLE throws can't be parried
           deflect(b, p);
           p.stats.clashes++;
           audio.parry();
@@ -142,6 +145,67 @@ export function resolveSlashes(): void {
           game.shake = Math.max(game.shake, 6);
           game.hitstop = Math.max(game.hitstop, 0.05);
         }
+      }
+    }
+  }
+}
+
+/**
+ * Soft body-vs-body resolution between fighters: gently separate overlapping
+ * players (so they can't stack), and shatter any frozen fighter that gets
+ * bumped — the brittle-ice rule from the source design.
+ */
+export function resolvePlayerCollisions(): void {
+  const ps = game.players;
+  for (let i = 0; i < ps.length; i++) {
+    const a = ps[i];
+    if (!a.alive) continue;
+    for (let j = i + 1; j < ps.length; j++) {
+      const b = ps[j];
+      if (!b.alive) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const min = a.r + b.r;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= min * min) continue;
+      const d = Math.sqrt(d2) || 0.0001;
+      // a frozen fighter caught in a collision is smashed apart on the spot
+      if (a.frozen > 0 && b.frozen <= 0 && a.invuln <= 0) {
+        a.die(b, dx / d, dy / d);
+        continue;
+      }
+      if (b.frozen > 0 && a.frozen <= 0 && b.invuln <= 0) {
+        b.die(a, -dx / d, -dy / d);
+        continue;
+      }
+      // otherwise just push them apart evenly
+      const push = (min - d) / 2;
+      const nx = dx / d;
+      const ny = dy / d;
+      a.x -= nx * push;
+      a.y -= ny * push;
+      b.x += nx * push;
+      b.y += ny * push;
+    }
+  }
+}
+
+/**
+ * Contagious fire: a burning fighter sets light to anyone they touch, and
+ * burning bots clustered together cascade into each other (a quirk the AI is
+ * happy to walk into).
+ */
+export function spreadFire(): void {
+  const ps = game.players;
+  for (let i = 0; i < ps.length; i++) {
+    const a = ps[i];
+    if (!a.alive || a.burning <= 0) continue;
+    for (let j = 0; j < ps.length; j++) {
+      if (i === j) continue;
+      const b = ps[j];
+      if (!b.alive || b.burning > 0 || b.invuln > 0) continue;
+      if (dist2(a.x, a.y, b.x, b.y) < (a.r + b.r + 4) * (a.r + b.r + 4)) {
+        b.ignite(a.burnSource ?? a);
       }
     }
   }

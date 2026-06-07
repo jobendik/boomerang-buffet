@@ -29,6 +29,7 @@ export interface GameState {
   roundWinner: Player | null;
   matchWinner: Player | null;
   pickupTimer: number;
+  pickupsSpawned: number; // match-cumulative count; gates "never first" books
   roundNum: number;
   menuSel: number;
   flashText: string;
@@ -53,6 +54,7 @@ export const game: GameState = {
   roundWinner: null,
   matchWinner: null,
   pickupTimer: 4,
+  pickupsSpawned: 0,
   roundNum: 0,
   menuSel: 0, // for hover
   flashText: '',

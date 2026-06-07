@@ -35,6 +35,7 @@ export class Boomerang {
   ice: boolean;
   bomb: boolean;
   multi: boolean;
+  unstoppable: boolean;
   dead: boolean;
   fireT: number;
   bounceFlash: number;
@@ -59,6 +60,7 @@ export class Boomerang {
     this.ice = false;
     this.bomb = false;
     this.multi = false;
+    this.unstoppable = false;
     this.dead = false;
     this.fireT = 0;
     this.bounceFlash = 0;
@@ -213,6 +215,7 @@ export class Boomerang {
       ex.transient = true;
       ex.life = 0.6;
       ex.fire = this.fire; // sub-projectiles keep the fire trail (smaller footprint)
+      ex.unstoppable = this.unstoppable; // an un-parryable fan stays un-parryable
       game.boomerangs.push(ex);
     }
     audio.throw_();
@@ -228,8 +231,10 @@ export class Boomerang {
     const R = 78;
     for (const p of game.players) {
       if (p.alive && p.invuln <= 0 && dist(this.x, this.y, p.x, p.y) < R + p.r) {
+        const self = p === this.origOwner;
         const [dx, dy] = norm(p.x - this.x, p.y - this.y);
         p.die(this.origOwner, dx, dy);
+        if (self) this.origOwner.stats.bombSelfKills++; // "Short Fuse"
       }
     }
     if (this.isMain) this.origOwner.loseBoomerang();
