@@ -74,10 +74,11 @@ Unstoppable/Hot Feet/Telekinesis/Bamboozle/**Disguise**/**Cool Walk**/
 (**Ice+Bomb freeze**, **Fire+Bomb fire-ring**, **Multi+Bomb splinter-blasts**,
 **burning/frozen paradox**) · contagious Burning ·
 brittle Frozen (mash-to-break) · soft player collision · Warp squash-kill ·
-3 arenas + random · bottomless pits + teleporters · **bushes (stealth cover)** ·
+4 arenas + random (incl. **Grove**) · bottomless pits + teleporters ·
+**bushes (stealth cover)** ·
 **crushers (squish-kill)** · **rain (douses fire)** ·
-**Fall-Protection (Off/Gentle/Extreme)** · **floor switches + gates** · 9
-fighters · modes: FFA / Team Up / Golden Boomerang / **Hide & Seek** · economy
+**Fall-Protection (Off/Gentle/Extreme)** · **floor switches + gates** · **12
+fighters** · modes: FFA / Team Up / Golden Boomerang / **Hide & Seek** · economy
 decay · 16 match awards (incl. **Rambo**, **Trash Compactor**,
 **Vengeful Ghost**, **Most Enthusiastic**, **Switcheroo**).
 
@@ -184,8 +185,9 @@ These slot into the existing power architecture cleanly (`powers.ts` +
 - **Vertical dodge** — a jump/airborne state that lifts you out of the collision
   radius to leap projectiles/grounded foes (blueprint's Y-axis evasion). Touches
   collision + rendering (shadow offset).
-- **More content** — toward 12 characters and biome-varied arenas; per-arena
-  music/ambience synths.
+- **More content** — 12 characters ✅ (added **Pip** watermelon, **Nibbles**
+  carrot, **Scoops** ice-cream) and a biome-varied arena ✅ (**Grove**, a leafy
+  pit-free map). Still open: per-arena music/ambience synths; more arenas.
 - **More awards** — Vengeful Ghost ✅ (kills landed after the owner's death,
   `stats.ghostKills` credited in `die`), Most Enthusiastic ✅ (distance
   travelled, `stats.distance`), Trash Compactor ✅ (with crushers),
@@ -221,8 +223,8 @@ matrix, the remaining P2 powers (**Decoy / Delayed Death / Phase Dash**) and
 
 1. **More awards** (P3) — Vengeful Ghost ✅, Most Enthusiastic ✅ and
    Switcheroo ✅ (+ its floor-switch mechanic) all done.
-2. **More content** (P3) — toward 12 characters and biome-varied arenas;
-   per-arena music/ambience synths.
+2. **More content** (P3) — 12 fighters ✅ + the Grove arena ✅ done. Remaining:
+   per-arena music/ambience synths, and yet more arenas if desired.
 3. **Battle Royale** power + **vertical dodge/jump** (P3, larger systems).
 
 Branch per feature, `npm run build` gate, keep `isEnemy`/telemetry conventions.

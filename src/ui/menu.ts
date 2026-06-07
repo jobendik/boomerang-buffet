@@ -255,27 +255,34 @@ export function drawMatchOver(): void {
   ctx.fillStyle = '#ffce54';
   ctx.fillText(title, W / 2, 250);
 
-  // telemetry awards
+  // telemetry awards — fan out into two columns once the list gets long so it
+  // never spills off the bottom of the screen
   const awards = computeAwards();
+  ctx.textAlign = 'center';
   ctx.font = '700 16px "Trebuchet MS"';
   ctx.fillStyle = 'rgba(255,243,223,.65)';
   ctx.fillText('— MATCH AWARDS —', W / 2, 300);
-  let ay = 332;
-  for (const aw of awards) {
+  const twoCol = awards.length > 7;
+  const perCol = twoCol ? Math.ceil(awards.length / 2) : awards.length;
+  const rowH = 40;
+  awards.forEach((aw, i) => {
+    const col = Math.floor(i / perCol);
+    const row = i % perCol;
+    const ox = twoCol ? (col === 0 ? W / 2 - 250 : W / 2 + 40) : W / 2 - 150;
+    const ay = 332 + row * rowH;
     ctx.save();
-    ctx.translate(W / 2 - 150, ay - 6);
+    ctx.translate(ox, ay - 6);
     ctx.scale(0.7, 0.7);
     aw.player.char.draw(aw.player.char, 17, [0, 0]);
     ctx.restore();
     ctx.textAlign = 'left';
     ctx.font = '900 17px "Trebuchet MS"';
     ctx.fillStyle = aw.player.char.body;
-    ctx.fillText(aw.title, W / 2 - 128, ay - 2);
-    ctx.font = '600 14px "Trebuchet MS"';
+    ctx.fillText(aw.title, ox + 22, ay - 2);
+    ctx.font = '600 13px "Trebuchet MS"';
     ctx.fillStyle = 'rgba(255,243,223,.7)';
-    ctx.fillText((aw.player.isAI ? 'CPU ' + aw.player.char.name : 'You') + ' · ' + aw.detail, W / 2 - 128, ay + 16);
-    ay += 44;
-  }
+    ctx.fillText((aw.player.isAI ? 'CPU ' + aw.player.char.name : 'You') + ' · ' + aw.detail, ox + 22, ay + 15);
+  });
 
   ctx.textAlign = 'center';
   ctx.font = '700 18px "Trebuchet MS"';
