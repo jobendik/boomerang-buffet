@@ -228,6 +228,17 @@ export class Player {
       this.bamboozled = Math.max(this.bamboozled, 9);
       return;
     }
+    // BATTLE ROYALE triggers a level-wide event rather than a kept modifier: a
+    // safe circle centred on the grab point that closes in, purging foes left
+    // outside it. (Re)starts the event centred where we're standing.
+    if (type === 'BATTLE') {
+      const cx = clamp(this.x, BOUNDS.l + 90, BOUNDS.r - 90);
+      const cy = clamp(this.y, BOUNDS.t + 90, BOUNDS.b - 90);
+      game.br = { cx, cy, r: 1300, rStart: 1300, rMin: 118, initiator: this, t: 0, shrink: 8.5, dur: 13 };
+      spawnRing(cx, cy, POWERS.BATTLE.color, 2.2);
+      audio.power();
+      return;
+    }
     // Honour mutually-exclusive groups (Fire/Ice, Hot Feet/Cool Walk): taking
     // one member drops the others in its group.
     for (const grp of EXCLUSIVE_GROUPS) {

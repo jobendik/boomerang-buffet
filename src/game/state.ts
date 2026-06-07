@@ -65,6 +65,23 @@ export interface Golden {
   bob: number;
 }
 
+/**
+ * A live Battle Royale event — a safe circle, centred where the power was
+ * grabbed, that shrinks over time. Fighters hostile to the `initiator` caught
+ * outside it are purged (credited to the initiator). One at a time.
+ */
+export interface BattleRoyale {
+  cx: number;
+  cy: number;
+  r: number; // current safe radius
+  rStart: number;
+  rMin: number;
+  initiator: Player;
+  t: number; // elapsed seconds
+  shrink: number; // seconds taken to close from rStart to rMin
+  dur: number; // total lifetime before the zone reopens
+}
+
 export interface GameState {
   state: GamePhase;
   players: Player[];
@@ -88,6 +105,7 @@ export interface GameState {
   fallProtect: number; // pit accessibility: 0 = Off, 1 = Gentle, 2 = Extreme
   golden: Golden | null;
   goldTarget: number; // seconds of carrying needed to win Golden mode
+  br: BattleRoyale | null; // active Battle Royale event, if any
   hsSetup: number; // Hide & Seek: remaining seeker-blind setup time
   hsTimer: number; // Hide & Seek: remaining hunt time before the hiders win
   hsDecoys: { x: number; y: number; propIdx: number }[]; // inert lookalike props
@@ -126,6 +144,7 @@ export const game: GameState = {
   fallProtect: 0,
   golden: null,
   goldTarget: 14,
+  br: null,
   hsSetup: 0,
   hsTimer: 0,
   hsDecoys: [],
