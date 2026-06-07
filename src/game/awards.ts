@@ -86,6 +86,18 @@ const DEFS: AwardDef[] = [
     threshold: 2,
     detail: (v) => v + ' tumbles into the void',
   },
+  {
+    title: 'Rambo',
+    value: (p) => p.stats.bushTime,
+    threshold: 6,
+    detail: (v) => Math.round(v) + 's lurking in the bushes',
+  },
+  {
+    title: 'Trash Compactor',
+    value: (p) => p.stats.crushDeaths,
+    threshold: 1,
+    detail: (v) => 'squished ' + v + (v === 1 ? ' time' : ' times'),
+  },
 ];
 
 export function computeAwards(): Award[] {

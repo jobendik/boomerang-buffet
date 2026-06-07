@@ -7,7 +7,7 @@ import { CHARS } from '../data/characters';
 import { ARENAS } from '../data/arena';
 import { roundRectPath } from '../gfx/shapes';
 
-const MODE_NAMES = ['Free-for-All', 'Team Up', 'Golden Boom'];
+const MODE_NAMES = ['Free-for-All', 'Team Up', 'Golden Boom', 'Hide & Seek'];
 import { game } from '../game/state';
 import { startMatch } from '../game/flow';
 import { computeAwards } from '../game/awards';
@@ -123,15 +123,19 @@ export function drawMenu(): void {
   ctx.fillText('WIN SCORE', W / 2 + 230, 318);
   drawCounter(W / 2 + 230, 348, game.target, '−', '+', 'target');
 
-  // second row: mode + arena
+  // second row: mode + arena + fall safety
   ctx.font = '700 22px "Trebuchet MS"';
   ctx.fillStyle = '#fff3df';
-  ctx.fillText('MODE', W / 2 - 150, 402);
-  drawCounter(W / 2 - 150, 432, game.mode, '<', '>', 'mode', MODE_NAMES[game.mode]);
+  ctx.fillText('MODE', W / 2 - 230, 402);
+  drawCounter(W / 2 - 230, 432, game.mode, '<', '>', 'mode', MODE_NAMES[game.mode]);
   ctx.fillStyle = '#fff3df';
-  ctx.fillText('ARENA', W / 2 + 150, 402);
+  ctx.fillText('ARENA', W / 2, 402);
   const arenaName = game.arenaSel < 0 ? 'Random' : ARENAS[game.arenaSel].name;
-  drawCounter(W / 2 + 150, 432, game.arenaSel, '<', '>', 'arena', arenaName);
+  drawCounter(W / 2, 432, game.arenaSel, '<', '>', 'arena', arenaName);
+  ctx.fillStyle = '#fff3df';
+  ctx.fillText('FALL SAFETY', W / 2 + 230, 402);
+  const fallNames = ['Off', 'Gentle', 'Extreme'];
+  drawCounter(W / 2 + 230, 432, game.fallProtect, '<', '>', 'fall', fallNames[game.fallProtect]);
 
   // play button
   const bw = 280;
@@ -209,6 +213,12 @@ export function handleMenuClick(): void {
           break;
         case 'arena+':
           game.arenaSel = clamp(game.arenaSel + 1, -1, ARENAS.length - 1);
+          break;
+        case 'fall-':
+          game.fallProtect = clamp(game.fallProtect - 1, 0, 2);
+          break;
+        case 'fall+':
+          game.fallProtect = clamp(game.fallProtect + 1, 0, 2);
           break;
       }
       return;

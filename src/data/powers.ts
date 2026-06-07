@@ -23,6 +23,7 @@ export const POWERS: Record<string, Power> = {
   HOTFEET: { name: 'Hot Feet', color: '#ff9a3a', icon: '➳' },
   TELEKINESIS: { name: 'Telekinesis', color: '#9d7bff', icon: '◉' },
   BAMBOOZLE: { name: 'Bamboozle', color: '#b06bff', icon: '?' },
+  DISGUISE: { name: 'Disguise', color: '#9bd17a', icon: '⌂' },
 };
 
 export type PowerKey = keyof typeof POWERS;

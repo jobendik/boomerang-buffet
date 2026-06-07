@@ -25,11 +25,13 @@ export function aiThink(p: Player, dt: number): Intents {
   a.tThink -= dt;
   a.tThrow -= dt;
   a.tStrafe -= dt;
-  // pick target = nearest alive enemy
+  // pick target = nearest alive enemy.
+  // Bots are deliberately fooled by DISGUISE and lose line-of-sight on foes
+  // lurking in bushes — both flaws faithfully kept from the source AI.
   let best: Player | null = null;
   let bd = Infinity;
   for (const q of game.players) {
-    if (q.alive && p.isEnemy(q)) {
+    if (q.alive && !q.disguised && !q.inBush && p.isEnemy(q)) {
       const d = dist2(p.x, p.y, q.x, q.y);
       if (d < bd) {
         bd = d;
@@ -65,7 +67,18 @@ export function aiThink(p: Player, dt: number): Intents {
 
   let mvx = 0;
   let mvy = 0;
-  if (best) {
+  if (game.mode === 3 && p.role === 'hider') {
+    // Hide & Seek hider: a weaponless bot flees the seeker, then holds still
+    // (which engages its prop disguise). It still dodges below to stay alive.
+    if (best) {
+      const d = Math.sqrt(bd);
+      if (d < 240) {
+        const away = norm(p.x - best.x, p.y - best.y);
+        mvx = away[0];
+        mvy = away[1];
+      }
+    }
+  } else if (best) {
     const d = Math.sqrt(bd);
     const [tx, ty] = norm(best.x - p.x, best.y - p.y);
     // aim with lead
@@ -167,6 +180,18 @@ export function aiThink(p: Player, dt: number): Intents {
       const [ax, ay] = norm(p.x - hz.x, p.y - hz.y);
       mvx += ax * 1.5;
       mvy += ay * 1.5;
+    }
+  }
+
+  // give crushing blocks a wide berth (repel from the block's centre)
+  for (const c of game.crushers) {
+    const cx = c.x + c.w / 2;
+    const cy = c.y + c.h / 2;
+    const margin = 50;
+    if (p.x > c.x - margin && p.x < c.x + c.w + margin && p.y > c.y - margin && p.y < c.y + c.h + margin) {
+      const [ax, ay] = norm(p.x - cx, p.y - cy);
+      mvx += ax * 2.2;
+      mvy += ay * 2.2;
     }
   }
 

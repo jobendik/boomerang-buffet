@@ -99,7 +99,19 @@ export function drawHUD(): void {
   let banner: string;
   if (game.mode === 2) banner = 'GOLDEN BOOMERANG  ·  hold it ' + game.goldTarget + 's to win';
   else if (game.mode === 1) banner = 'TEAM UP  ·  round ' + game.roundNum + '  ·  first to ' + game.target;
-  else banner = 'ROUND ' + game.roundNum + '  ·  first to ' + game.target;
+  else if (game.mode === 3) {
+    const seeker = game.players.find((p) => p.role === 'seeker');
+    const hidersLeft = game.players.filter((p) => p.role === 'hider' && p.alive).length;
+    if (game.hsSetup > 0) banner = 'HIDE & SEEK  ·  hiders, find a spot!';
+    else
+      banner =
+        'HIDE & SEEK  ·  ' +
+        Math.ceil(game.hsTimer) +
+        's left  ·  ' +
+        hidersLeft +
+        ' hiders  ·  attempts: ' +
+        (seeker ? seeker.attemptsLeft : 0);
+  } else banner = 'ROUND ' + game.roundNum + '  ·  first to ' + game.target;
   ctx.fillText(banner, W / 2, 62);
 }
 

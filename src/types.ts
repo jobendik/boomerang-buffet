@@ -31,6 +31,22 @@ export interface Spawn {
   y: number;
 }
 
+/**
+ * A kinematic crushing block. It oscillates from its base `(x, y)` to
+ * `(x + dx, y + dy)` and back every `period` seconds; a fighter pinned between
+ * it and a wall/obstacle is squished (an environmental death, no killer).
+ */
+export interface CrusherDef {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  dx: number; // travel offset at full extension
+  dy: number;
+  period: number; // seconds for one full out-and-back cycle
+  phase?: number; // 0..1 starting offset along the cycle
+}
+
 /** A linked teleporter pair: entities at node A are warped to node B and back. */
 export interface Portal {
   ax: number;
@@ -46,6 +62,8 @@ export interface Arena {
   obstacles: Rect[];
   spawns: Spawn[];
   pits: Rect[]; // bottomless — a grounded fighter standing in one falls out
+  bushes: Rect[]; // leafy cover: hides a fighter from bots, feeds "Rambo"
+  crushers: CrusherDef[]; // kinematic blocks that squish the careless
   portals: Portal[];
   floorA: string;
   floorB: string;

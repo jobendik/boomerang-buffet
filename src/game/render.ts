@@ -38,10 +38,20 @@ export function render(): void {
       drawCenterText('GO!', '', '#7ad06d');
     }
   }
+  // Hide & Seek: the seeker's view is blacked out while the hiders scatter
+  if (game.state === 'playing' && game.mode === 3 && game.hsSetup > 0) {
+    ctx.fillStyle = 'rgba(8,5,12,.97)';
+    ctx.fillRect(0, 0, W, H);
+    drawCenterText(String(Math.ceil(game.hsSetup)), 'NO PEEKING — HIDERS ARE HIDING…', '#ffce54');
+  }
+
   if (game.state === 'roundover') {
     ctx.fillStyle = 'rgba(20,12,28,.45)';
     ctx.fillRect(0, 0, W, H);
-    if (game.roundWinner) {
+    if (game.mode === 3) {
+      const seekerWon = !!game.roundWinner && game.roundWinner.role === 'seeker';
+      drawCenterText(seekerWon ? 'SEEKER WINS!' : 'HIDERS WIN!', null, seekerWon ? '#ff7ad0' : '#7ad06d');
+    } else if (game.roundWinner) {
       drawCenterText(
         (game.roundWinner.isAI ? 'CPU ' + game.roundWinner.char.name : 'YOU') + ' SCORES!',
         null,

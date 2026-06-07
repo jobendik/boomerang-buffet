@@ -1,4 +1,4 @@
-import type { Arena, Rect, Spawn, Portal } from '../types';
+import type { Arena, Rect, Spawn, Portal, CrusherDef } from '../types';
 
 /**
  * Selectable arenas. Geometry/spawns/hazards for the *current* arena are
@@ -21,6 +21,14 @@ export const ARENAS: Arena[] = [
       { x: 772, y: 418, w: 72, h: 72 },
     ],
     pits: [],
+    bushes: [
+      { x: 296, y: 296, w: 84, h: 72 },
+      { x: 644, y: 296, w: 84, h: 72 },
+    ],
+    crushers: [
+      { x: 360, y: 70, w: 56, h: 56, dx: 0, dy: 150, period: 3.2, phase: 0 },
+      { x: 608, y: 470, w: 56, h: 56, dx: 0, dy: -150, period: 3.2, phase: 0.5 },
+    ],
     portals: [],
     spawns: [
       { x: 110, y: 110 },
@@ -46,6 +54,11 @@ export const ARENAS: Arena[] = [
       { x: 754, y: 250, w: 120, h: 140 },
       { x: 462, y: 270, w: 100, h: 100 },
     ],
+    bushes: [
+      { x: 300, y: 250, w: 80, h: 84 },
+      { x: 644, y: 250, w: 80, h: 84 },
+    ],
+    crushers: [],
     portals: [],
     spawns: [
       { x: 90, y: 90 },
@@ -69,6 +82,11 @@ export const ARENAS: Arena[] = [
       { x: 480, y: 290, w: 64, h: 60 },
     ],
     pits: [{ x: 482, y: 60, w: 60, h: 60 }],
+    bushes: [
+      { x: 150, y: 264, w: 84, h: 72 },
+      { x: 790, y: 264, w: 84, h: 72 },
+    ],
+    crushers: [{ x: 140, y: 240, w: 56, h: 56, dx: 260, dy: 0, period: 3.6, phase: 0 }],
     // diagonally-linked teleporters keep the action looping across the map
     portals: [
       { ax: 120, ay: 320, bx: 904, by: 320, r: 26 },
@@ -90,6 +108,8 @@ export let arena: Arena = ARENAS[0];
 export let OBSTACLES: Rect[] = arena.obstacles;
 export let SPAWNS: Spawn[] = arena.spawns;
 export let PITS: Rect[] = arena.pits;
+export let BUSHES: Rect[] = arena.bushes;
+export let CRUSHERS: CrusherDef[] = arena.crushers;
 export let PORTALS: Portal[] = arena.portals;
 
 /** Select the active arena by index, republishing the live bindings. */
@@ -98,5 +118,7 @@ export function setArena(i: number): void {
   OBSTACLES = arena.obstacles;
   SPAWNS = arena.spawns;
   PITS = arena.pits;
+  BUSHES = arena.bushes;
+  CRUSHERS = arena.crushers;
   PORTALS = arena.portals;
 }

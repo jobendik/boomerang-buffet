@@ -77,30 +77,47 @@ export function update(dt: number): void {
   }
 
   if (game.state === 'playing') {
-    // pickups spawn (gated by the dynamic economy decay)
-    game.pickupTimer -= dt;
-    if (game.pickupTimer <= 0 && game.pickups.length < 3) {
-      if (Math.random() < pickupSpawnChance()) {
-        spawnPickup();
-        game.pickupTimer = rand(5, 8.5);
-      } else {
-        game.pickupTimer = rand(2, 3.5); // leader heavily buffed — retry sooner, spawn less
+    // Hide & Seek phase clocks: first the seeker-blind setup, then the hunt.
+    if (game.mode === 3) {
+      if (game.hsSetup > 0) game.hsSetup = Math.max(0, game.hsSetup - dt);
+      else game.hsTimer = Math.max(0, game.hsTimer - dt);
+    }
+
+    // pickups spawn (gated by the dynamic economy decay; none in Hide & Seek)
+    if (game.mode !== 3) {
+      game.pickupTimer -= dt;
+      if (game.pickupTimer <= 0 && game.pickups.length < 3) {
+        if (Math.random() < pickupSpawnChance()) {
+          spawnPickup();
+          game.pickupTimer = rand(5, 8.5);
+        } else {
+          game.pickupTimer = rand(2, 3.5); // leader heavily buffed — retry sooner, spawn less
+        }
       }
     }
+
+    // Hide & Seek: refund the seeker any attempt that actually lands a kill,
+    // so only whiffs against decoys/scenery deplete the pool.
+    const seeker = game.mode === 3 ? game.players.find((p) => p.role === 'seeker') : null;
+    const seekerKillsBefore = seeker ? seeker.stats.kills : 0;
 
     // players
     for (const p of game.players) {
       if (!p.alive) continue;
-      const intents = p.isAI ? aiThink(p, dt) : humanIntents(p);
+      let intents = p.isAI ? aiThink(p, dt) : humanIntents(p);
+      // a blinded seeker is rooted in place during the setup window
+      if (p === seeker && game.hsSetup > 0) intents = { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
       p.update(dt, intents);
     }
     resolvePlayerCollisions(); // soft separation + frozen-shatter-on-bump
+    for (const c of game.crushers) c.update(dt); // move blocks + squish the pinned
     spreadFire(); // burning fighters ignite their neighbours
     updateGolden(dt); // Golden Boomerang carry/score (no-op in other modes)
     // boomerangs
     for (const b of game.boomerangs) b.update(dt);
     resolveBoomerangHits();
     resolveSlashes();
+    if (seeker && seeker.stats.kills > seekerKillsBefore) seeker.attemptsLeft += seeker.stats.kills - seekerKillsBefore;
     // hazards
     game.hazards = game.hazards.filter((h) => h.update(dt));
     // pickups

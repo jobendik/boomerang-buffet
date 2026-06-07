@@ -1,11 +1,12 @@
 import { audio } from '../core/audio';
 import { dist, rand, randi } from '../core/math';
 import { BOUNDS } from '../constants';
-import { ARENAS, OBSTACLES, PITS, SPAWNS, setArena } from '../data/arena';
+import { ARENAS, OBSTACLES, PITS, SPAWNS, CRUSHERS, setArena } from '../data/arena';
 import { POWER_KEYS, NEVER_FIRST } from '../data/powers';
 import { CHARS } from '../data/characters';
 import { Player } from '../entities/Player';
 import { Pickup } from '../entities/Pickup';
+import { Crusher } from '../entities/Crusher';
 import { game } from './state';
 
 /** Match / round lifecycle and power-up spawning. */
@@ -48,6 +49,10 @@ export function startRound(): void {
   game.pickups = [];
   game.particles = [];
   game.hazards = [];
+  game.crushers = CRUSHERS.map((d) => new Crusher(d));
+  // Weather: a 5% chance of rain, but only on maps with no bottomless pits
+  // (slick footing + a yawning void would be a touch too cruel).
+  game.raining = PITS.length === 0 && Math.random() < 0.05;
   const spawnsOrder = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
   game.players.forEach((p, i) => {
     p.reset(SPAWNS[spawnsOrder[i]]);
@@ -59,9 +64,54 @@ export function startRound(): void {
   } else {
     game.golden = null;
   }
+  setupHideSeek();
   game.pickupTimer = 3.5;
   game.state = 'countdown';
   game.countdownT = 2.2;
+}
+
+/**
+ * Hide & Seek round setup: the human (player 0) is the seeker, everyone else a
+ * hider. Hiders are stripped of weapons and will melt into props once the
+ * seeker-blind setup window closes; the seeker gets a finite pool of attempts.
+ * Inert decoy props are scattered so the seeker can't just swat every prop.
+ */
+function setupHideSeek(): void {
+  game.hsDecoys = [];
+  if (game.mode !== 3) {
+    game.hsSetup = 0;
+    game.hsTimer = 0;
+    return;
+  }
+  const hiders = game.numPlayers - 1;
+  game.players.forEach((p) => {
+    p.role = p.idx === 0 ? 'seeker' : 'hider';
+    if (p.role === 'hider') {
+      p.boomsInHand = 0;
+      p.boomsMax = 0;
+      p.respawns = [];
+    } else {
+      p.attemptsLeft = hiders * 2 + 2; // refunded on a hit, so misses are what bite
+    }
+  });
+  game.hsSetup = 10; // seeker blinded while hiders scurry into position
+  game.hsTimer = 40; // hunt time once setup ends; elapse → hiders win
+  // scatter lookalike decoys at free spots
+  const want = hiders + 5;
+  for (let n = 0; n < want; n++) {
+    for (let tries = 0; tries < 25; tries++) {
+      const x = rand(BOUNDS.l + 60, BOUNDS.r - 60);
+      const y = rand(BOUNDS.t + 60, BOUNDS.b - 60);
+      let ok = true;
+      for (const R of OBSTACLES) if (x > R.x - 34 && x < R.x + R.w + 34 && y > R.y - 34 && y < R.y + R.h + 34) ok = false;
+      for (const P of PITS) if (x > P.x - 34 && x < P.x + P.w + 34 && y > P.y - 34 && y < P.y + P.h + 34) ok = false;
+      for (const d of game.hsDecoys) if (dist(x, y, d.x, d.y) < 70) ok = false;
+      if (ok) {
+        game.hsDecoys.push({ x, y, propIdx: randi(0, 2) });
+        break;
+      }
+    }
+  }
 }
 
 export function endRoundCheck(): void {
@@ -75,6 +125,29 @@ export function endRoundCheck(): void {
       game.state = 'roundover';
       game.roundoverT = 1.4;
     }
+    return;
+  }
+
+  // Hide & Seek: the seeker wins by clearing every hider before time runs out;
+  // the hiders win if the clock expires (or the seeker somehow perishes).
+  if (game.mode === 3) {
+    const seeker = game.players.find((p) => p.role === 'seeker');
+    const hiders = game.players.filter((p) => p.role === 'hider' && p.alive);
+    const seekerWon = !!seeker && seeker.alive && hiders.length === 0;
+    const hidersWon = !seeker || !seeker.alive || game.hsTimer <= 0;
+    if (!seekerWon && !hidersWon) return;
+    if (seekerWon && seeker) {
+      seeker.score++;
+      game.roundWinner = seeker;
+    } else {
+      for (const h of hiders) h.score++; // every survivor banks the round
+      game.roundWinner = hiders[0] ?? null;
+    }
+    game.state = 'roundover';
+    game.roundoverT = 2.0;
+    audio.win();
+    const champ = game.players.find((p) => p.score >= game.target);
+    if (champ) game.matchWinner = champ;
     return;
   }
 

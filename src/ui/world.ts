@@ -1,8 +1,31 @@
 import { ctx } from '../core/canvas';
 import { TAU } from '../core/math';
+import { W, H, WALL } from '../constants';
 import { game } from '../game/state';
-import { drawBoomShape } from '../gfx/shapes';
+import { drawBoomShape, drawProp } from '../gfx/shapes';
 import { drawArena } from './arena';
+
+/** Slanting rain + a cool tint, when the weather has turned. */
+function drawRain(): void {
+  ctx.save();
+  // cool wash over the play area
+  ctx.fillStyle = 'rgba(90,130,180,.1)';
+  ctx.fillRect(WALL, WALL, W - WALL * 2, H - WALL * 2);
+  // streaks: a scrolling deterministic field (no Math.random per frame)
+  ctx.strokeStyle = 'rgba(180,210,240,.32)';
+  ctx.lineWidth = 1.5;
+  const t = game.time;
+  for (let i = 0; i < 90; i++) {
+    const seed = i * 97.13;
+    const x = ((seed * 13.7) % (W - WALL * 2)) + WALL;
+    const y = (((seed * 29.3 + t * 760) % (H - WALL * 2)) + (H - WALL * 2)) % (H - WALL * 2) + WALL;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - 4, y + 14);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
 /** The Golden Boomerang artifact (Golden mode only). */
 function drawGolden(): void {
@@ -27,6 +50,15 @@ function drawGolden(): void {
 /** Draws the live play-field: arena + all entities, depth-sorted by y. */
 export function drawWorld(): void {
   drawArena();
+  // crusher travel grooves sit on the floor, under everything
+  for (const c of game.crushers) c.drawTrack();
+  // Hide & Seek decoy props — visually identical to a disguised hider
+  for (const d of game.hsDecoys) {
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    drawProp(d.propIdx, 19);
+    ctx.restore();
+  }
   // hazards under players
   for (const h of game.hazards) h.draw();
   // pickups
@@ -35,10 +67,14 @@ export function drawWorld(): void {
   // players
   const sorted = [...game.players].sort((a, b) => a.y - b.y);
   for (const p of sorted) p.draw();
+  // crusher blocks ride above fighters, so the squished vanish beneath them
+  for (const c of game.crushers) c.draw();
   // a carried artifact rides above its holder
   if (game.golden && game.golden.carrier) drawGolden();
   // boomerangs on top
   for (const b of game.boomerangs) b.draw();
   // particles
   for (const p of game.particles) p.draw();
+  // weather overlay last, over the whole field
+  if (game.raining) drawRain();
 }
