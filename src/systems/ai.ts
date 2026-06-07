@@ -195,6 +195,8 @@ export function aiThink(p: Player, dt: number): Intents {
       mvx = perp[0] * side;
       mvy = perp[1] * side;
       intents.dash = true;
+    } else if (p.airCd <= 0 && p.airT <= 0 && ddist < 90) {
+      intents.jump = true; // dash on cooldown — hop the throw instead
     } else {
       mvx += dangerVec[0];
       mvy += dangerVec[1];

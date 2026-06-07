@@ -103,6 +103,8 @@ export interface Intents {
   dash?: boolean;
   /** Melee slash — also clashes/parries incoming boomerangs (requires being armed). */
   slash?: boolean;
+  /** Hop into the air — lifts you out of the collision radius to leap projectiles/foes. */
+  jump?: boolean;
 }
 
 /** Result of a circle-vs-rectangle collision test. */

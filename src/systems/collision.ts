@@ -69,7 +69,7 @@ export function updateSwitches(): void {
   for (const s of game.switches) {
     const now: number[] = [];
     for (const p of game.players) {
-      if (!p.alive) continue;
+      if (!p.alive || p.airborne) continue; // a hopping fighter doesn't weigh on the plate
       if (dist(p.x, p.y, s.x, s.y) < s.r) now.push(p.idx);
     }
     // rising edges (idx present now but not last frame) count as a flip
@@ -345,6 +345,8 @@ export function resolvePlayerCollisions(): void {
     for (let j = i + 1; j < ps.length; j++) {
       const b = ps[j];
       if (!b.alive) continue;
+      // a hopping fighter sails clear over grounded ones (and vice-versa)
+      if (a.airborne || b.airborne) continue;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const min = a.r + b.r;

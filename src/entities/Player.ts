@@ -21,6 +21,9 @@ const SLASH_CD = 0.42; // base melee cooldown
 const SLASH_CD_FAST = 0.24; // with EXTRA (dual-wield)
 const MAX_CURVE = 5.2; // rad/s angular velocity at full charge
 const RESPAWN_TIME = 1.2; // delay before a lost boomerang returns to hand
+const JUMP_TIME = 0.5; // seconds airborne per hop
+const JUMP_H = 30; // peak visual height of a hop
+const JUMP_CD = 0.85; // hop cooldown
 
 interface AIState {
   tThink: number;
@@ -84,6 +87,9 @@ export class Player {
   charging!: boolean;
   dashT!: number;
   dashCd!: number;
+  airT!: number; // remaining airborne (jump) time — immune & passes over foes
+  airCd!: number; // jump cooldown
+  jumpZ!: number; // current visual height off the ground while airborne
   invuln!: number;
   slashT!: number;
   slashCd!: number;
@@ -164,6 +170,9 @@ export class Player {
     this.charging = false;
     this.dashT = 0;
     this.dashCd = 0;
+    this.airT = 0;
+    this.airCd = 0;
+    this.jumpZ = 0;
     this.invuln = 0;
     this.slashT = 0;
     this.slashCd = 0;
@@ -198,6 +207,10 @@ export class Player {
   /** Armed = holding at least one boomerang (can throw & slash). */
   get armed(): boolean {
     return this.boomsInHand > 0;
+  }
+  /** Mid-jump: lifted off the ground, so ground threats pass harmlessly under. */
+  get airborne(): boolean {
+    return this.airT > 0;
   }
 
   /** True if `o` is a valid target for us (self & teammates are never hostile).
@@ -274,6 +287,20 @@ export class Player {
     if (this.slashT > 0) this.slashT = Math.max(0, this.slashT - dt);
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
     if (this.frozen > 0) this.frozen = Math.max(0, this.frozen - dt);
+
+    // JUMP / vertical dodge: while airborne, rise on a parabolic arc and stay
+    // untouchable (we top up invuln, so every existing damage guard skips us —
+    // boomerangs, slashes, fire, blasts and grounded foes all pass underneath).
+    this.airCd = Math.max(0, this.airCd - dt);
+    if (this.airT > 0) {
+      this.airT = Math.max(0, this.airT - dt);
+      this.jumpZ = Math.sin((1 - this.airT / JUMP_TIME) * Math.PI) * JUMP_H;
+      this.invuln = Math.max(this.invuln, this.airT + 0.04);
+      if (this.airT <= 0) {
+        this.jumpZ = 0;
+        this.invuln = Math.max(this.invuln, 0.12); // brief landing grace
+      }
+    }
 
     // DELAYED DEATH: living on borrowed time after a lethal hit. The fighter
     // keeps playing for the duration, then the death finalises (DELAYED was
@@ -386,8 +413,17 @@ export class Player {
       if (this.frozen <= 0) spawnRing(this.x, this.y, '#bdf0ff', 1.0);
     }
 
+    // jump / vertical dodge trigger — a dedicated evade (no offence mid-air)
+    if (!frozen && intents.jump && this.airT <= 0 && this.airCd <= 0 && this.dashT <= 0) {
+      this.airT = JUMP_TIME;
+      this.airCd = JUMP_CD;
+      this.invuln = Math.max(this.invuln, JUMP_TIME);
+      audio.dash();
+      spawnDashPuff(this.x, this.y, this.aim, this.char.body);
+    }
+
     // dash / teleport trigger
-    if (!frozen && intents.dash && this.dashCd <= 0 && this.dashT <= 0) {
+    if (!frozen && intents.dash && this.dashCd <= 0 && this.dashT <= 0 && this.airT <= 0) {
       if (this.powers.has('TELEPORT') && this.tryTeleport()) {
         // teleported to an airborne boomerang
       } else {
@@ -412,7 +448,7 @@ export class Player {
 
     // slash trigger — only while ARMED (mirrors Boomerang Fu's state machine).
     // A Hide & Seek seeker may only swing while attempts remain.
-    if (!frozen && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0 && (!this.isSeeker || this.attemptsLeft > 0)) {
+    if (!frozen && !this.airborne && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0 && (!this.isSeeker || this.attemptsLeft > 0)) {
       if (this.isSeeker) this.attemptsLeft--;
       this.slashT = SLASH_ACTIVE;
       this.slashCd = this.powers.has('EXTRA') ? SLASH_CD_FAST : SLASH_CD;
@@ -480,8 +516,8 @@ export class Player {
     } else {
       // Gentle: nudge the player back from the lip (danger softened, not gone).
       if (game.fallProtect === 1) nudgeFromPits(this, dt);
-      // A grounded fighter who stops over a pit falls out; dashing leaps it.
-      if (this.dashT <= 0 && inPit(this.x, this.y)) {
+      // A grounded fighter who stops over a pit falls out; dashing or hopping leaps it.
+      if (this.dashT <= 0 && !this.airborne && inPit(this.x, this.y)) {
         this.fall();
         return;
       }
@@ -495,10 +531,10 @@ export class Player {
     // teleport/portal jumps don't inflate it)
     this.stats.distance += Math.hypot(this.vx, this.vy) * dt;
 
-    // throw handling
+    // throw handling (no throwing mid-hop — a jump is a pure evade)
     const telekinetic = this.powers.has('TELEKINESIS');
     if (this.ai.tkSteer > 0) this.ai.tkSteer = Math.max(0, this.ai.tkSteer - dt);
-    if (!frozen) {
+    if (!frozen && !this.airborne) {
       if (this.isAI) {
         if (intents.throwNow && this.armed) this.doThrow(intents.charge ?? 0.6);
       } else if (telekinetic) {
@@ -536,7 +572,7 @@ export class Player {
     // get the same behaviour for free once the setup window closes.
     if ((this.powers.has('DISGUISE') || (this.isHider && game.hsSetup <= 0)) && !frozen) {
       const moving = !!(intents.move[0] || intents.move[1]) || Math.hypot(this.vx, this.vy) > 26;
-      const acting = !!(intents.slash || intents.dash || intents.throwNow || intents.throwHeld) || this.charging || this.slashT > 0 || this.dashT > 0;
+      const acting = !!(intents.slash || intents.dash || intents.jump || intents.throwNow || intents.throwHeld) || this.charging || this.slashT > 0 || this.dashT > 0 || this.airT > 0;
       if (moving || acting) {
         if (this.disguised) spawnRing(this.x, this.y, POWERS.DISGUISE.color, 0.9);
         this.disguised = false;
@@ -797,14 +833,15 @@ export class Player {
     }
 
     const bobY = Math.sin(this.bob) * 1.8;
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,.28)';
+    // shadow — stays grounded but shrinks & fades as the fighter hops upward
+    const zk = this.jumpZ / JUMP_H; // 0 grounded … 1 at apex
+    ctx.fillStyle = `rgba(0,0,0,${0.28 - zk * 0.16})`;
     ctx.beginPath();
-    ctx.ellipse(this.x, this.y + this.r * 0.95, this.r * 0.9, this.r * 0.42, 0, 0, TAU);
+    ctx.ellipse(this.x, this.y + this.r * 0.95, this.r * 0.9 * (1 - zk * 0.4), this.r * 0.42 * (1 - zk * 0.4), 0, 0, TAU);
     ctx.fill();
 
     ctx.save();
-    ctx.translate(this.x, this.y + bobY);
+    ctx.translate(this.x, this.y + bobY - this.jumpZ);
 
     // stacked power auras (one faint ring per active modifier)
     let ringIdx = 0;
@@ -831,8 +868,8 @@ export class Player {
       ctx.stroke();
       ctx.restore();
     }
-    // invuln flicker
-    if (this.invuln > 0 && Math.floor(game.time * 20) % 2 === 0) ctx.globalAlpha = 0.55;
+    // invuln flicker (suppressed mid-hop — the raised sprite reads as airborne)
+    if (this.invuln > 0 && this.airT <= 0 && Math.floor(game.time * 20) % 2 === 0) ctx.globalAlpha = 0.55;
     // lurking in foliage fades the fighter into the leaves
     if (this.inBush) ctx.globalAlpha *= 0.45;
 
@@ -904,20 +941,21 @@ export class Player {
     }
     ctx.restore();
 
-    // boomerang-in-hand indicators + charge arc
+    // boomerang-in-hand indicators + charge arc (ride up with the hop)
     if (this.boomsInHand > 0) {
+      const hbY = this.y + bobY - this.jumpZ;
       const a = Math.atan2(this.aim[1], this.aim[0]);
       for (let i = 0; i < this.boomsInHand; i++) {
         const off = (i - (this.boomsInHand - 1) / 2) * 0.5;
         const hx = this.x + Math.cos(a + off) * (this.r + 9);
-        const hy = this.y + bobY + Math.sin(a + off) * (this.r + 9);
+        const hy = hbY + Math.sin(a + off) * (this.r + 9);
         drawBoomShape(hx, hy, 7, game.time * 6, this.char.dark);
       }
       if (this.charging && this.charge > 0.05) {
         ctx.strokeStyle = `hsl(${lerp(60, 0, this.charge)},100%,60%)`;
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(this.x, this.y + bobY, this.r + 14, a - this.charge * 1.5, a + this.charge * 1.5);
+        ctx.arc(this.x, hbY, this.r + 14, a - this.charge * 1.5, a + this.charge * 1.5);
         ctx.stroke();
       }
     }
