@@ -244,6 +244,120 @@ function drawShroom(c: Char, r: number, look: Vec2): void {
   mouthSmile(r * 0.7);
 }
 
+function drawMelon(c: Char, r: number, look: Vec2): void {
+  // watermelon wedge: a half-disc with the flat (cut) edge up
+  ctx.fillStyle = c.dark; // rind
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.18, r * 1.05, 0, Math.PI);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = c.accent; // pale inner rind
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.18, r * 0.9, 0, Math.PI);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = c.body; // red flesh
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.18, r * 0.74, 0, Math.PI);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#2a1622'; // seeds
+  for (const s of [[-0.34, 0.28], [0.0, 0.42], [0.34, 0.28], [-0.16, 0.12], [0.18, 0.12]] as const) {
+    ctx.beginPath();
+    ctx.ellipse(s[0] * r, (s[1] - 0.18) * r, r * 0.06, r * 0.1, 0, 0, TAU);
+    ctx.fill();
+  }
+  eyes(r * 0.82, [look[0], Math.max(-0.3, look[1])]);
+  mouthSmile(r * 0.62);
+}
+
+function drawCarrot(c: Char, r: number, look: Vec2): void {
+  // leafy fronds sprouting from the crown
+  ctx.strokeStyle = c.accent;
+  ctx.lineWidth = r * 0.13;
+  ctx.lineCap = 'round';
+  for (const s of [-1, 0, 1] as const) {
+    ctx.beginPath();
+    ctx.moveTo(s * r * 0.16, -r * 0.45);
+    ctx.quadraticCurveTo(s * r * 0.5, -r * 1.0, s * r * 0.34, -r * 1.18);
+    ctx.stroke();
+  }
+  // tapered root: a downward triangle
+  ctx.fillStyle = c.dark;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.6, -r * 0.5);
+  ctx.lineTo(r * 0.6, -r * 0.5);
+  ctx.lineTo(0, r * 1.12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = c.body;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.46, -r * 0.4);
+  ctx.lineTo(r * 0.46, -r * 0.4);
+  ctx.lineTo(0, r * 0.92);
+  ctx.closePath();
+  ctx.fill();
+  // horizontal ridge ticks down the body
+  ctx.strokeStyle = 'rgba(255,255,255,.22)';
+  ctx.lineWidth = Math.max(1.4, r * 0.06);
+  for (const yy of [-0.1, 0.2, 0.5] as const) {
+    const half = (1 - (yy + 0.4) / 1.32) * r * 0.42;
+    ctx.beginPath();
+    ctx.moveTo(-half, yy * r);
+    ctx.lineTo(half, yy * r);
+    ctx.stroke();
+  }
+  eyes(r * 0.66, look);
+  mouthSmile(r * 0.52);
+}
+
+function drawCone(c: Char, r: number, look: Vec2): void {
+  // waffle cone (point down)
+  ctx.fillStyle = c.accent;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.5, 0);
+  ctx.lineTo(r * 0.5, 0);
+  ctx.lineTo(0, r * 1.18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(120,80,30,.4)';
+  ctx.lineWidth = Math.max(1, r * 0.05);
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * r * 0.18, 0);
+    ctx.lineTo(i * r * 0.02, r * 1.1);
+    ctx.stroke();
+  }
+  for (let i = 0; i <= 3; i++) {
+    const yy = i / 3;
+    const half = (1 - yy) * r * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-half, yy * r * 1.05);
+    ctx.lineTo(half, yy * r * 1.05);
+    ctx.stroke();
+  }
+  // scoop
+  ctx.fillStyle = c.dark;
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.34, r * 0.8, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = c.body;
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.4, r * 0.66, 0, TAU);
+  ctx.fill();
+  // cherry on top
+  ctx.fillStyle = '#e0454f';
+  ctx.beginPath();
+  ctx.arc(0, -r * 1.02, r * 0.16, 0, TAU);
+  ctx.fill();
+  // face sits on the scoop
+  ctx.save();
+  ctx.translate(0, -r * 0.4);
+  eyes(r * 0.6, look);
+  mouthSmile(r * 0.5);
+  ctx.restore();
+}
+
 export const CHARS: Char[] = [
   { name: 'Avo', body: '#7fc242', dark: '#5a9430', accent: '#7a4a2a', draw: drawAvo },
   { name: 'Toastie', body: '#f2c177', dark: '#c98f43', accent: '#8a5a2a', draw: drawToast },
@@ -254,4 +368,7 @@ export const CHARS: Char[] = [
   { name: 'Sprinkle', body: '#c98f5a', dark: '#a06c3e', accent: '#ff9ecb', draw: drawDonut },
   { name: 'Pepito', body: '#ff4d3a', dark: '#c9301f', accent: '#5fae57', draw: drawChili },
   { name: 'Button', body: '#ff5d5d', dark: '#d83b3b', accent: '#f7efd8', draw: drawShroom },
+  { name: 'Pip', body: '#f64b63', dark: '#3f8f3f', accent: '#c7e7a6', draw: drawMelon },
+  { name: 'Nibbles', body: '#ff8a33', dark: '#e26a16', accent: '#5fae57', draw: drawCarrot },
+  { name: 'Scoops', body: '#ffc2dd', dark: '#f79ec4', accent: '#dcb27a', draw: drawCone },
 ];

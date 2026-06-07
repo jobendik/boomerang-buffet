@@ -118,6 +118,40 @@ export const ARENAS: Arena[] = [
       { x: 824, y: 320 },
     ],
   },
+  {
+    name: 'Grove',
+    floorA: '#2c3a24',
+    floorB: '#26331f',
+    accent: '#9bd17a',
+    // mossy logs for cover; the leafy theme leans on its many bushes
+    obstacles: [
+      { x: 240, y: 120, w: 90, h: 40 },
+      { x: 694, y: 120, w: 90, h: 40 },
+      { x: 240, y: 480, w: 90, h: 40 },
+      { x: 694, y: 480, w: 90, h: 40 },
+      { x: 472, y: 290, w: 80, h: 60 },
+    ],
+    pits: [], // pit-free, so the 5% rain roll can land here
+    bushes: [
+      { x: 150, y: 270, w: 92, h: 84 },
+      { x: 782, y: 270, w: 92, h: 84 },
+      { x: 440, y: 150, w: 92, h: 70 },
+      { x: 440, y: 420, w: 92, h: 70 },
+    ],
+    crushers: [],
+    // a single shortcut portal across the grove
+    portals: [{ ax: 130, ay: 140, bx: 894, by: 500, r: 26 }],
+    gates: [],
+    switches: [],
+    spawns: [
+      { x: 110, y: 110 },
+      { x: 914, y: 110 },
+      { x: 110, y: 530 },
+      { x: 914, y: 530 },
+      { x: 512, y: 92 },
+      { x: 512, y: 548 },
+    ],
+  },
 ];
 
 /** The arena currently in play (live binding; reassigned by `setArena`). */
