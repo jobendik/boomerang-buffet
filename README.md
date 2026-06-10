@@ -5,7 +5,10 @@ fighters fling returning boomerangs that bounce off walls and slice opponents.
 Grab power-ups, dash, and parry — last snack standing wins the round.
 
 Built with **Vite** + **TypeScript** + Canvas 2D. No game-art or audio assets:
-every fighter is procedural vector art and every sound is a tiny WebAudio synth.
+every fighter is procedural vector art, every arena is painted by a
+biome-themed renderer, every icon is hand-drawn vector geometry, and every
+sound is a tiny WebAudio synth. The only binary assets are the two bundled
+typefaces (Lilita One & Nunito, via `@fontsource`).
 
 ## Getting started
 
@@ -22,10 +25,12 @@ npm run typecheck
 | Action | Input |
 | ------ | ----- |
 | Move   | `WASD` / Arrow keys |
-| Aim    | Mouse |
+| Aim    | Mouse (custom crosshair; charging shows the predicted flight path) |
 | Throw  | Left-Click — **hold to charge & bank the curve** |
 | Slash  | Right-Click / `E` — melee kill **and** clash/parry incoming boomerangs |
 | Dash / Warp | `Space` (with **Warp** power, dash teleports you to your airborne boomerang) |
+| Hop    | `Shift` / `F` — a vertical dodge over boomerangs, foes and pits |
+| Pause  | `Esc` |
 | Mute   | `M` |
 
 ## Core mechanics (modelled on *Boomerang Fu*)
@@ -53,65 +58,76 @@ npm run typecheck
 - **Soft body collision** — fighters gently shove each other apart instead of
   overlapping, and crashing into a frozen foe smashes them to pieces.
 - **Game modes** — *Free-for-All*, *Team Up* (two squads, friendly-fire off),
-  and *Golden Boomerang* (hold the artifact a cumulative N seconds to win — your
-  power-ups are suspended while you carry it).
-- **Arenas & hazards** — three selectable arenas (or random each round) with
-  bottomless **pits** (dash to leap them) and linked **teleporters** that warp
-  both fighters and boomerangs while preserving momentum.
+  *Golden Boomerang* (hold the artifact a cumulative N seconds to win — your
+  power-ups are suspended while you carry it), and *Hide & Seek*.
+- **Arenas & hazards** — five biome-themed arenas (or random each round):
+  bottomless **pits** (dash or hop to leap them), linked **teleporters** that
+  preserve momentum, **crusher pistons**, **floor switches** that retract
+  colour-matched **gates**, leafy **bushes** for stealth, and the Freezer's
+  **slick ice floors** that turn footwork into drifting.
 - **Dynamic economy** — power-book spawn odds decay the more powers the leading
   fighter already holds, to curb snowballing.
-- **Match-end awards** — post-match telemetry hands out comedic awards
-  (Fastest Reflexes, Ice Breaker, Pyromaniac, Short Fuse, Drunken Master, Slow
-  Learner, …).
+- **Cinematic feel** — slow-motion on round-deciding kills, hitstop, screen
+  shake, kill popups, squash-and-stretch fighters, scorch decals and a charged
+  throw trajectory preview.
+- **Match-end awards** — post-match telemetry hands out comedic awards on a
+  podium screen (Fastest Reflexes, Ice Breaker, Pyromaniac, Short Fuse,
+  Drunken Master, Slow Learner, …).
+- **A real front end** — animated title screen, match setup with fighter
+  select & arena minimaps, a how-to-play page with a hoverable power glossary,
+  an Esc pause menu, and settings persisted to `localStorage`.
 
 ## Project structure
 
 ```
 src/
-├─ main.ts            # entry point — wires input + starts the loop
+├─ main.ts            # entry point — fonts, input, starts the loop
 ├─ constants.ts       # logical resolution & arena bounds
 ├─ types.ts           # shared cross-module types
-├─ style.css          # page/canvas styling
+├─ style.css          # page shell styling
 │
 ├─ core/              # engine plumbing
-│  ├─ canvas.ts       # shared canvas + 2D context
+│  ├─ canvas.ts       # shared HiDPI canvas + 2D context + offscreen layers
 │  ├─ math.ts         # vector & number helpers
 │  ├─ audio.ts        # procedural WebAudio synth
 │  └─ input.ts        # keyboard / mouse / touch
 │
 ├─ data/              # static, declarative game data
-│  ├─ characters.ts   # the six food fighters + their vector art
-│  ├─ powers.ts       # power-up definitions
-│  └─ arena.ts        # obstacle & spawn layout
+│  ├─ characters.ts   # the twelve food fighters + their vector art
+│  ├─ powers.ts       # power-up definitions (+ one-line descriptions)
+│  └─ arena.ts        # the five arena layouts (geometry, spawns, hazards)
 │
 ├─ gfx/
-│  └─ shapes.ts       # reusable canvas shape helpers
+│  ├─ shapes.ts       # reusable canvas shape helpers
+│  └─ icons.ts        # vector glyphs for every power + the winner's crown
 │
 ├─ entities/          # simulation objects (one class per file)
 │  ├─ Player.ts
 │  ├─ Boomerang.ts
-│  ├─ FirePatch.ts
+│  ├─ Crusher.ts
+│  ├─ FirePatch.ts / IcePatch.ts
 │  ├─ Pickup.ts
-│  └─ Particle.ts
+│  └─ Particle.ts     # sparks, chunks, rings, popup text, confetti
 │
 ├─ systems/           # cross-entity logic
 │  ├─ collision.ts    # geometry + boomerang/parry resolution
 │  ├─ ai.ts           # CPU fighter behaviour
-│  └─ effects.ts      # particle-burst spawners
+│  └─ effects.ts      # particle/decal/popup spawners
 │
 ├─ game/              # orchestration
-│  ├─ state.ts        # the single mutable game-state container
+│  ├─ state.ts        # the single mutable game-state container + persistence
 │  ├─ flow.ts         # match / round lifecycle + economy decay
 │  ├─ awards.ts       # post-match telemetry awards
-│  ├─ update.ts       # per-frame simulation step
-│  ├─ render.ts       # per-frame draw dispatch
-│  └─ loop.ts         # requestAnimationFrame loop
+│  ├─ update.ts       # per-frame simulation step (pause, slow-mo)
+│  ├─ render.ts       # per-frame draw dispatch (overlays, crosshair)
+│  └─ loop.ts         # requestAnimationFrame loop + global input routing
 │
 └─ ui/                # screens & overlays
-   ├─ arena.ts        # arena backdrop
-   ├─ world.ts        # play-field (arena + entities)
-   ├─ hud.ts          # scoreboard / banners
-   └─ menu.ts         # title & match-over screens
+   ├─ widgets.ts      # shared canvas UI kit: fonts, panels, buttons, keycaps
+   ├─ arena.ts        # biome-themed arena renderer (cached static layer)
+   ├─ world.ts        # play-field (arena + decals + entities + weather)
+   ├─ hud.ts          # scoreboard, banner, toasts, cooldown chips
+   └─ menu.ts         # title / setup / help / pause / match-over screens
 ```
 
 ### Architecture notes
