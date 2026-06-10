@@ -175,32 +175,44 @@ export function aiThink(p: Player, dt: number): Intents {
     }
   }
   if (danger) {
-    // slash to clash if close, armed & facing; else dash perpendicular
-    const facing = norm(intents.aimX, intents.aimY);
-    const toBoom = norm(danger.x - p.x, danger.y - p.y);
-    if (
-      ddist < 60 &&
-      p.armed &&
-      p.slashCd <= 0 &&
-      facing[0] * toBoom[0] + facing[1] * toBoom[1] > 0.2 &&
-      Math.random() < 0.5 + game.difficulty * 0.2
-    ) {
-      intents.slash = true;
-      intents.aimX = toBoom[0];
-      intents.aimY = toBoom[1];
-    } else if (p.dashCd <= 0 && ddist < 110) {
-      // dash perpendicular to incoming
-      const perp = [-dangerVec[1], dangerVec[0]];
-      const side = Math.random() < 0.5 ? 1 : -1;
-      mvx = perp[0] * side;
-      mvy = perp[1] * side;
-      intents.dash = true;
-    } else if (p.airCd <= 0 && p.airT <= 0 && ddist < 90) {
-      intents.jump = true; // dash on cooldown — hop the throw instead
-    } else {
-      mvx += dangerVec[0];
-      mvy += dangerVec[1];
+    // Decide ONCE per incoming throw whether we react to it at all. Without this
+    // reaction-miss roll, bots dash/jump-dodge every single boomerang — and since
+    // a dodge grants invulnerability i-frames, they become untouchable and combat
+    // never resolves. The chance scales with difficulty so higher tiers feel sharper.
+    if (danger !== a.dodgeBoom) {
+      a.dodgeBoom = danger;
+      a.dodgeActive = Math.random() < 0.45 + game.difficulty * 0.2;
     }
+    if (a.dodgeActive) {
+      // slash to clash if close, armed & facing; else dash perpendicular
+      const facing = norm(intents.aimX, intents.aimY);
+      const toBoom = norm(danger.x - p.x, danger.y - p.y);
+      if (
+        ddist < 60 &&
+        p.armed &&
+        p.slashCd <= 0 &&
+        facing[0] * toBoom[0] + facing[1] * toBoom[1] > 0.2 &&
+        Math.random() < 0.5 + game.difficulty * 0.2
+      ) {
+        intents.slash = true;
+        intents.aimX = toBoom[0];
+        intents.aimY = toBoom[1];
+      } else if (p.dashCd <= 0 && ddist < 110) {
+        // dash perpendicular to incoming
+        const perp = [-dangerVec[1], dangerVec[0]];
+        const side = Math.random() < 0.5 ? 1 : -1;
+        mvx = perp[0] * side;
+        mvy = perp[1] * side;
+        intents.dash = true;
+      } else if (p.airCd <= 0 && p.airT <= 0 && ddist < 90) {
+        intents.jump = true; // dash on cooldown — hop the throw instead
+      } else {
+        mvx += dangerVec[0];
+        mvy += dangerVec[1];
+      }
+    }
+  } else {
+    a.dodgeBoom = null;
   }
 
   // avoid hazards

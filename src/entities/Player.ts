@@ -19,8 +19,8 @@ import type { Char, Intents, Spawn, Vec2 } from '../types';
 const SLASH_ACTIVE = 0.12; // seconds the blade is "live"
 const SLASH_CD = 0.42; // base melee cooldown
 const SLASH_CD_FAST = 0.24; // with EXTRA (dual-wield)
-const MAX_CURVE = 5.2; // rad/s angular velocity at full charge
-const BASE_CURVE = 1.15; // rad/s baseline bank on even an uncharged throw — every
+const MAX_CURVE = 1.8; // rad/s angular velocity at full charge
+const BASE_CURVE = 0.5; // rad/s baseline bank on even an uncharged throw — every
 //                          flight arcs out and loops back, the boomerang's signature
 const RESPAWN_TIME = 1.2; // delay before a lost boomerang returns to hand
 const JUMP_TIME = 0.5; // seconds airborne per hop
@@ -35,6 +35,8 @@ interface AIState {
   tThrow: number;
   tkSteer: number; // remaining time a bot keeps piloting a telekinetic throw
   goPower: PowerKey | null;
+  dodgeBoom: Boomerang | null; // the incoming throw we last reacted to
+  dodgeActive: boolean; // whether we committed to actively dodging dodgeBoom
 }
 
 interface PlayerStats {
@@ -159,6 +161,8 @@ export class Player {
       tThrow: rand(0.3, 1.2),
       tkSteer: 0,
       goPower: null,
+      dodgeBoom: null,
+      dodgeActive: false,
     };
   }
 
