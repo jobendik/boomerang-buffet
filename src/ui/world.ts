@@ -3,31 +3,58 @@ import { TAU } from '../core/math';
 import { W, H, WALL } from '../constants';
 import { game } from '../game/state';
 import type { Decoy } from '../game/state';
+import { arena } from '../data/arena';
 import { CHARS } from '../data/characters';
 import { POWERS } from '../data/powers';
 import { drawBoomShape, drawProp } from '../gfx/shapes';
 import { drawArena } from './arena';
 
-/** Slanting rain + a cool tint, when the weather has turned. */
-function drawRain(): void {
+/** Weather overlay: slanting rain — or drifting snow on the ice biome. */
+function drawWeather(): void {
   ctx.save();
-  // cool wash over the play area
-  ctx.fillStyle = 'rgba(90,130,180,.1)';
-  ctx.fillRect(WALL, WALL, W - WALL * 2, H - WALL * 2);
-  // streaks: a scrolling deterministic field (no Math.random per frame)
-  ctx.strokeStyle = 'rgba(180,210,240,.32)';
-  ctx.lineWidth = 1.5;
   const t = game.time;
-  for (let i = 0; i < 90; i++) {
-    const seed = i * 97.13;
-    const x = ((seed * 13.7) % (W - WALL * 2)) + WALL;
-    const y = (((seed * 29.3 + t * 760) % (H - WALL * 2)) + (H - WALL * 2)) % (H - WALL * 2) + WALL;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x - 4, y + 14);
-    ctx.stroke();
+  if (arena.biome === 'ice') {
+    // lazy snowflakes, deterministic field (no Math.random per frame)
+    ctx.fillStyle = 'rgba(235,245,255,.5)';
+    for (let i = 0; i < 70; i++) {
+      const seed = i * 97.13;
+      const x = ((seed * 13.7 + Math.sin(t * 0.7 + i) * 30) % (W - WALL * 2)) + WALL;
+      const y = (((seed * 29.3 + t * 70) % (H - WALL * 2)) + (H - WALL * 2)) % (H - WALL * 2) + WALL;
+      ctx.beginPath();
+      ctx.arc(x, y, 1 + (i % 3) * 0.7, 0, TAU);
+      ctx.fill();
+    }
+  } else {
+    // cool wash over the play area
+    ctx.fillStyle = 'rgba(90,130,180,.1)';
+    ctx.fillRect(WALL, WALL, W - WALL * 2, H - WALL * 2);
+    ctx.strokeStyle = 'rgba(180,210,240,.32)';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 90; i++) {
+      const seed = i * 97.13;
+      const x = ((seed * 13.7) % (W - WALL * 2)) + WALL;
+      const y = (((seed * 29.3 + t * 760) % (H - WALL * 2)) + (H - WALL * 2)) % (H - WALL * 2) + WALL;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - 4, y + 14);
+      ctx.stroke();
+    }
   }
   ctx.restore();
+}
+
+/** Fading floor marks: explosion scorches, frost blooms. */
+function drawDecals(): void {
+  for (const d of game.decals) {
+    const a = Math.min(1, d.t / Math.min(2, d.max)) * d.alpha; // hold, then fade out
+    const g = ctx.createRadialGradient(d.x, d.y, d.r * 0.1, d.x, d.y, d.r);
+    g.addColorStop(0, `rgba(${d.rgb},${a})`);
+    g.addColorStop(1, `rgba(${d.rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r, 0, TAU);
+    ctx.fill();
+  }
 }
 
 /** The Golden Boomerang artifact (Golden mode only). */
@@ -112,6 +139,7 @@ function drawBattleRoyale(): void {
 /** Draws the live play-field: arena + all entities, depth-sorted by y. */
 export function drawWorld(): void {
   drawArena();
+  drawDecals(); // lasting scorches/frost sit directly on the floor
   // crusher travel grooves sit on the floor, under everything
   for (const c of game.crushers) c.drawTrack();
   // Hide & Seek decoy props — visually identical to a disguised hider
@@ -143,5 +171,5 @@ export function drawWorld(): void {
   // Battle Royale boundary overlay sits above the field
   if (game.br) drawBattleRoyale();
   // weather overlay last, over the whole field
-  if (game.raining) drawRain();
+  if (game.raining) drawWeather();
 }

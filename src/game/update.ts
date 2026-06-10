@@ -1,9 +1,10 @@
 import { audio } from '../core/audio';
+import { W } from '../constants';
 import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse } from '../core/input';
 import { aiThink } from '../systems/ai';
 import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
-import { spawnRing } from '../systems/effects';
+import { spawnConfetti, spawnRing } from '../systems/effects';
 import { POWERS } from '../data/powers';
 import { Particle } from '../entities/Particle';
 import { game } from './state';
@@ -94,14 +95,40 @@ function humanIntents(p: Player): Intents {
 }
 
 export function update(dt: number): void {
+  // Esc pause: hold the whole sim (render keeps presenting the frozen frame)
+  if (game.paused) return;
+
+  const raw = dt;
+  // cinematic slow-mo (round-deciding kills): the timer burns in real time
+  // while everything below — including particles & visuals — runs at 30%.
+  if (game.state === 'playing' && game.slowmo > 0) {
+    game.slowmo = Math.max(0, game.slowmo - raw);
+    dt *= 0.3;
+  }
   game.time += dt;
   game.shake = Math.max(0, game.shake - dt * 40);
+  if (game.fightT > 0) game.fightT = Math.max(0, game.fightT - raw);
 
-  if (game.state === 'menu' || game.state === 'matchover') return;
+  // age the power-pickup toasts & floor decals
+  for (const t of game.toasts) t.t += raw;
+  game.toasts = game.toasts.filter((t) => t.t < 3);
+  for (const d of game.decals) d.t -= dt;
+  game.decals = game.decals.filter((d) => d.t > 0);
+
+  if (game.state === 'menu') return;
+  if (game.state === 'matchover') {
+    // confetti drifts over the podium for as long as the screen is up
+    if (Math.random() < 0.2) spawnConfetti(rand(W * 0.1, W * 0.9), -14, 2);
+    game.particles = game.particles.filter((p) => p.update(dt));
+    return;
+  }
 
   if (game.state === 'countdown') {
     game.countdownT -= dt;
-    if (game.countdownT <= 0) game.state = 'playing';
+    if (game.countdownT <= 0) {
+      game.state = 'playing';
+      game.fightT = 0.8; // "FIGHT!" splash
+    }
   }
 
   if (game.hitstop > 0) {

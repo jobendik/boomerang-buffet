@@ -65,13 +65,30 @@ export class Crusher {
   /** Faint groove showing the block's travel path (drawn under fighters). */
   drawTrack(): void {
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,.25)';
     const x0 = Math.min(this.bx, this.bx + this.dx);
     const y0 = Math.min(this.by, this.by + this.dy);
     const x1 = Math.max(this.bx + this.w, this.bx + this.dx + this.w);
     const y1 = Math.max(this.by + this.h, this.by + this.dy + this.h);
+    ctx.fillStyle = 'rgba(0,0,0,.16)';
     roundRectPath(x0, y0, x1 - x0, y1 - y0, 8);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(255,206,84,.18)';
+    ctx.lineWidth = 1.5;
+    roundRectPath(x0 + 1, y0 + 1, x1 - x0 - 2, y1 - y0 - 2, 7);
+    ctx.stroke();
+    // guide rail down the travel axis, so the groove reads "machine", not "pit"
+    ctx.strokeStyle = 'rgba(0,0,0,.3)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 10]);
+    ctx.beginPath();
+    if (Math.abs(this.dx) > Math.abs(this.dy)) {
+      ctx.moveTo(x0 + 8, this.by + this.h / 2);
+      ctx.lineTo(x1 - 8, this.by + this.h / 2);
+    } else {
+      ctx.moveTo(this.bx + this.w / 2, y0 + 8);
+      ctx.lineTo(this.bx + this.w / 2, y1 - 8);
+    }
+    ctx.stroke();
     ctx.restore();
   }
 

@@ -15,12 +15,14 @@ interface AudioSys {
   catch_(): void;
   slice(): void;
   dash(): void;
+  jump(): void;
   parry(): void;
   power(): void;
   bomb(): void;
   freeze(): void;
   win(): void;
   tick(): void;
+  pause(): void;
 }
 
 export const audio: AudioSys = {
@@ -37,7 +39,7 @@ export const audio: AudioSys = {
       const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ac = new Ctx();
       this.master = this.ac.createGain();
-      this.master.gain.value = 0.5;
+      this.master.gain.value = this.muted ? 0 : 0.5;
       this.master.connect(this.ac.destination);
     } catch {
       this.ac = null;
@@ -98,6 +100,10 @@ export const audio: AudioSys = {
   dash() {
     this.noise(0.14, 0.25, 2000);
   },
+  jump() {
+    this.beep(330, 0.14, 'sine', 0.22, 660);
+    this.noise(0.08, 0.12, 2600);
+  },
   parry() {
     this.beep(1200, 0.08, 'square', 0.3, 1900);
     this.beep(1700, 0.1, 'triangle', 0.18, 900);
@@ -117,5 +123,8 @@ export const audio: AudioSys = {
   },
   tick() {
     this.beep(420, 0.05, 'square', 0.15);
+  },
+  pause() {
+    this.beep(520, 0.09, 'triangle', 0.2, 340);
   },
 };

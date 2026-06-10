@@ -39,6 +39,7 @@ export function spawnExplosion(x: number, y: number): void {
     );
   }
   game.particles.push(new Particle(x, y, 0, 0, 0.4, '#ffd23a', 120, 'ring'));
+  spawnDecal(x, y, 42, 9, '16,9,14', 0.5); // lasting scorch on the floor
 }
 
 export function spawnRing(x: number, y: number, color: string, scale = 1): void {
@@ -57,6 +58,35 @@ export function spawnDashPuff(x: number, y: number, dir: Vec2, color: string): v
         color,
         rand(3, 6)
       )
+    );
+  }
+}
+
+/** A single soft scuff of dust kicked up at running feet. */
+export function spawnFootDust(x: number, y: number): void {
+  game.particles.push(
+    new Particle(x + rand(-4, 4), y + rand(-2, 2), rand(-18, 18), rand(-26, -8), rand(0.25, 0.45), 'rgba(255,243,223,.3)', rand(2.5, 4.5))
+  );
+}
+
+/** A floating popup word at a kill/event site ("SLICED!", "CRUSHED!" …). */
+export function spawnPopText(x: number, y: number, text: string, color: string, size = 19): void {
+  game.particles.push(new Particle(x, Math.max(48, y - 26), 0, -34, 1.0, color, size, 'text', text));
+}
+
+/** A fading floor mark (explosion scorch, frost ring). Capped so the floor
+ *  never silts up — the oldest decal is dropped first. */
+export function spawnDecal(x: number, y: number, r: number, life: number, rgb: string, alpha: number): void {
+  game.decals.push({ x, y, r, t: life, max: life, rgb, alpha });
+  if (game.decals.length > 24) game.decals.shift();
+}
+
+/** A celebratory confetti burst (match-over screen, big plays). */
+export function spawnConfetti(x: number, y: number, n: number): void {
+  const cols = ['#ff5d6c', '#ffce54', '#7ad06d', '#7ad0ff', '#ff7ad0', '#c08bff', '#fff3df'];
+  for (let i = 0; i < n; i++) {
+    game.particles.push(
+      new Particle(x + rand(-30, 30), y, rand(-60, 60), rand(20, 90), rand(2.2, 3.6), cols[i % cols.length], rand(5, 9), 'confetti')
     );
   }
 }

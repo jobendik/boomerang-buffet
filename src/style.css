@@ -1,13 +1,12 @@
 :root {
-  --bg0: #2a1c3a;
-  --bg1: #3d2456;
-  --ink: #1a1228;
+  --bg0: #221330;
+  --bg1: #3b1f55;
+  --ink: #140c20;
   --cream: #fff3df;
-  --gold: #ffce54;
-  --tomato: #ff5d5d;
-  --leaf: #7ad06d;
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 4px 0 #1a1228;
-  --round: 18px;
+  --shadow:
+    0 30px 80px rgba(0, 0, 0, 0.6),
+    0 10px 28px rgba(0, 0, 0, 0.5);
+  --round: 20px;
 }
 
 * {
@@ -23,11 +22,12 @@ body {
 
 body {
   background:
-    radial-gradient(1200px 700px at 50% -10%, #4a2a66 0%, transparent 60%),
-    radial-gradient(900px 600px at 110% 120%, #5a2b4a 0%, transparent 55%),
-    linear-gradient(160deg, var(--bg1), var(--bg0));
+    radial-gradient(1100px 640px at 18% -12%, rgba(122, 64, 180, 0.5) 0%, transparent 60%),
+    radial-gradient(900px 600px at 108% 116%, rgba(190, 70, 120, 0.42) 0%, transparent 58%),
+    radial-gradient(700px 480px at 88% -6%, rgba(60, 130, 190, 0.28) 0%, transparent 55%),
+    linear-gradient(160deg, var(--bg1), var(--bg0) 70%);
   color: var(--cream);
-  font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  font-family: "Nunito Variable", "Nunito", "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -38,25 +38,53 @@ body {
   touch-action: none;
 }
 
-/* faint dotted texture */
+/* faint confetti-dot texture over the backdrop */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.06;
-  background-image: radial-gradient(#fff 1px, transparent 1.4px);
-  background-size: 22px 22px;
+  opacity: 0.05;
+  background-image:
+    radial-gradient(#ffce54 1.2px, transparent 1.6px),
+    radial-gradient(#8affd6 1px, transparent 1.4px);
+  background-size: 34px 34px, 26px 26px;
+  background-position: 0 0, 13px 17px;
+}
+
+/* soft floor glow beneath the game frame */
+body::after {
+  content: "";
+  position: fixed;
+  left: 50%;
+  bottom: 4%;
+  width: 70vw;
+  height: 12vh;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(255, 170, 90, 0.14), transparent);
+  filter: blur(6px);
 }
 
 #wrap {
   position: relative;
-  width: min(96vw, 168vh);
+  width: min(96vw, 152vh);
   aspect-ratio: 1024 / 640;
   border-radius: var(--round);
   box-shadow: var(--shadow);
-  outline: 6px solid #120c1d;
+  outline: 5px solid #0d0816;
+  border: 2px solid rgba(255, 210, 130, 0.16);
   overflow: hidden;
+}
+
+/* glass glare across the top edge of the frame */
+#wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(173deg, rgba(255, 255, 255, 0.07) 0%, transparent 22%);
 }
 
 canvas {
@@ -64,23 +92,5 @@ canvas {
   width: 100%;
   height: 100%;
   image-rendering: auto;
-  background: #241a33;
-}
-
-#hint {
-  position: fixed;
-  bottom: 10px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 12px;
-  letter-spacing: 0.5px;
-  color: #caa9dd;
-  opacity: 0.8;
-}
-
-@media (max-width: 560px) {
-  #hint {
-    display: none;
-  }
+  background: #1c1129;
 }

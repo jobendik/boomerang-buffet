@@ -242,10 +242,8 @@ These slot into the existing power architecture cleanly (`powers.ts` +
 - **Balance is playtest-unverified.** The newer systems were built build-clean
   but never tuned against real play. Watch especially: jump immunity uptime
   (0.5s air / 0.85s `JUMP_CD`), Battle Royale `shrink` (8.5s) / `rMin` (118px) /
-  `dur` (13s) and its full initiator+ally immunity, and Decoy's 2-clone cap.
-- **HUD power-icon row can overflow.** The right-aligned icons in each scoreboard
-  card step 15px leftward from `cardW-8`; a deep stack (~8+ powers) collides with
-  the name/score. Could wrap to a second row or shrink the glyphs.
+  `dur` (13s) and its full initiator+ally immunity, Decoy's 2-clone cap, and the
+  Freezer's slick `grip` constant (0.16 in `Player.update`).
 - Soft player-vs-player collision can nudge a fighter slightly into a wall for a
   frame (corrected next frame by obstacle resolve). Fine for a party game.
 - Golden-carrier still shows power auras even though throws ignore them
@@ -255,44 +253,56 @@ These slot into the existing power architecture cleanly (`powers.ts` +
 - `Boomerang.update` rebuilds a `solids` array (obstacles + open-gate filter)
   every frame per boomerang on gated arenas — cheap, but cache it per-frame if a
   hot path ever needs it.
-- Switches/gates and crushers/portals are only placed in a couple of arenas;
-  Grove is deliberately hazard-light. More arenas could exercise them.
-- The jump and Battle Royale reuse `audio.dash()` / `audio.power()`; distinct
-  SFX would read better.
+- A Battle Royale book grabbed inside the Freezer vault centres the ring where
+  outsiders may not reach in time — rare, dramatic, currently deemed a feature.
+- Bots don't understand the Freezer's slick floors (they steer as if grippy);
+  reads as comedy at Chill/Normal, but Spicy bots lose some edge there.
+- Gate open/close visuals lerp (~0.1s) behind the binary collision state.
 - Line-endings: repo mixes LF/CRLF on Windows (git warns, harmless).
 
 ---
 
-## Status: P1–P3 essentially complete
+## Status: P1–P3 complete + presentation overhaul
 
 Every P1 feature, every P2 power + the full stacking matrix, and every P3
-"larger system" except **local multiplayer** is now implemented. The roadmap
-above is a record; the live backlog is below.
+"larger system" except **local multiplayer** is implemented. On top of that the
+game now has a full presentation layer:
+
+- **Visual foundation** — HiDPI canvas (`core/canvas.ts` owns the DPR scale +
+  offscreen layer helpers), bundled typefaces (`@fontsource`), a vector icon
+  set for all powers (`gfx/icons.ts`), and a shared canvas UI kit
+  (`ui/widgets.ts`: panels/buttons/keycaps/pills).
+- **Biome-themed arenas** — `ui/arena.ts` paints diner/rooftop/neon/grove/ice
+  floors, walls, furniture & foliage into a cached static layer (rebuilt on
+  arena change); portals/switches/gates stay live. Arenas: reworked layouts +
+  the new **Freezer** (slick floors, piston-guarded vault, `Arena.slick`).
+- **Menu flow** — title → setup (fighter select, arena minimaps, segmented
+  controls) → help (controls/rules/power glossary w/ hover tips); Esc pause
+  (resume/restart/quit/sound); match-over podium + awards + rematch; settings
+  persist in `localStorage` (`state.ts` save/load).
+- **Game feel** — throw trajectory preview (human, while charging), custom
+  crosshair, kill popups, slow-mo on round-deciding & Golden-carrier kills
+  (✅ the blueprint's time-dilation), scorch/frost decals, squash & stretch,
+  run dust, ribbon boomerang trails, snow on the ice biome, jump/pause SFX,
+  HUD toasts describing each grabbed power, dash/hop cooldown chips, wrapped
+  HUD power icons (✅ old overflow fixed).
 
 ## Remaining backlog (roughly easiest → hardest)
 
-1. **Playtest & tune.** The single highest-value next step — boot `npm run dev`
-   and tune the unverified knobs (jump, Battle Royale, Decoy; see Known
-   limitations). No code spelunking required, just numbers.
-2. **Audio polish** — distinct jump/landing + Battle-Royale SFX; per-arena
-   ambience/music synths keyed off the biome (Diner/Pitfall/Crossfire/Grove).
-3. **Golden time-dilation** — brief slow-mo (scale `dt`) when the Golden carrier
-   scores a kill (blueprint's cinematic beat). Dynamic hold-time already scales.
-4. **HUD power-icon overflow fix** — wrap/shrink the stacked-icon row (see Known
-   limitations) so deep stacks stay readable.
-5. **More content** — more arenas that exercise switches/gates/crushers/portals;
-   more fighters toward the source's wider roster; the "taller models peek from
-   cover" Hide & Seek flavour.
-6. **Fidelity refinements from the blueprint** — Teleport targeting the
+1. **Playtest & tune.** Boot `npm run dev` and tune the unverified knobs (jump,
+   Battle Royale, Decoy, slick grip; see Known limitations). Just numbers.
+2. **Audio polish** — Battle-Royale klaxon; per-arena ambience/music synths
+   keyed off the biome (jump/pause SFX are done).
+3. **More content** — more arenas exercising switches/gates/crushers/portals;
+   more fighters; the "taller models peek from cover" Hide & Seek flavour.
+4. **Fidelity refinements from the blueprint** — Teleport targeting the
    *first-thrown* boomerang (currently nearest main); velocity-perfect portal
    feel + FX; Decoys inheriting Caffeine speed / drifting; bot teammate revives
    in Team Up (no revive system exists yet).
-7. **Settings persistence** — remember menu selections (mode/arena/skill/etc.)
-   in `localStorage`.
-8. **A headless smoke test** — the canvas can't be tested, but the pure logic
-   (`isEnemy`, `computeAwards`, `pickupSpawnChance`, elemental exclusion) could
-   get a tiny jsdom/node test to guard regressions in CI.
-9. **Local multiplayer / controllers** (the big one) — multiple human players via
+5. **A headless smoke test** — the canvas can't be tested, but the pure logic
+   (`isEnemy`, `computeAwards`, `pickupSpawnChance`, elemental exclusion,
+   settings load clamping) could get a tiny jsdom/node test for CI.
+6. **Local multiplayer / controllers** (the big one) — multiple human players via
    the Gamepad API, per-player input + menu player-config. Touches input, the
    player-build path, and the menu; the source's whole point but a major lift.
 
