@@ -15,7 +15,8 @@ export interface Char {
 export interface Power {
   name: string;
   color: string;
-  icon: string;
+  /** One-line effect summary, surfaced in pickup toasts & the help glossary. */
+  desc: string;
 }
 
 /** Axis-aligned rectangle used by the arena obstacles. */
@@ -73,9 +74,14 @@ export interface GateDef {
   h: number;
 }
 
+/** Visual family an arena belongs to — drives the themed renderer. */
+export type Biome = 'diner' | 'rooftop' | 'neon' | 'grove' | 'ice';
+
 /** A selectable arena: geometry, spawns, hazards and a colour theme. */
 export interface Arena {
   name: string;
+  tagline: string; // one-line flavour shown in the menu
+  biome: Biome;
   obstacles: Rect[];
   spawns: Spawn[];
   pits: Rect[]; // bottomless — a grounded fighter standing in one falls out
@@ -87,6 +93,7 @@ export interface Arena {
   floorA: string;
   floorB: string;
   accent: string;
+  slick?: boolean; // icy footing: drifty acceleration & braking
 }
 
 /**

@@ -1,5 +1,5 @@
 import { ctx } from '../core/canvas';
-import { clamp, rand, TAU } from '../core/math';
+import { clamp, TAU } from '../core/math';
 import { roundRectPath } from '../gfx/shapes';
 import type { Char, Vec2 } from '../types';
 
@@ -88,10 +88,11 @@ function drawBerry(c: Char, r: number, look: Vec2): void {
   ctx.bezierCurveTo(-r * 0.95, -r * 0.7, -r * 1.05, r * 0.4, 0, r * 1.05);
   ctx.closePath();
   ctx.fill();
+  // seeds — fixed layout (a per-frame shuffle would shimmer distractingly)
   ctx.fillStyle = 'rgba(255,255,255,.5)';
   for (let i = 0; i < 7; i++) {
-    const a = rand(0, TAU);
-    const rr = rand(0.15, 0.7) * r;
+    const a = (i / 7) * TAU + 0.9;
+    const rr = (0.2 + ((i * 37) % 5) * 0.11) * r;
     ctx.beginPath();
     ctx.ellipse(Math.cos(a) * rr, Math.sin(a) * rr * 0.9 + r * 0.1, r * 0.06, r * 0.1, a, 0, TAU);
     ctx.fill();

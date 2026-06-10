@@ -5,7 +5,7 @@ import { BOUNDS } from '../constants';
 import { OBSTACLES } from '../data/arena';
 import { drawBoomShape } from '../gfx/shapes';
 import { circleRect, resolvePortals } from '../systems/collision';
-import { spawnExplosion, spawnRing } from '../systems/effects';
+import { spawnDecal, spawnExplosion, spawnPopText, spawnRing } from '../systems/effects';
 import { game } from '../game/state';
 import { FirePatch } from './FirePatch';
 import type { Player } from './Player';
@@ -272,7 +272,11 @@ export class Boomerang {
     //  · Fire + Bomb → a caging ring of lingering fire around the perimeter
     const icy = this.ice;
     const R = (icy ? 112 : 78) * this.blastScale;
-    if (icy) spawnRing(this.x, this.y, '#bdf0ff', 2.0 * this.blastScale);
+    if (icy) {
+      spawnRing(this.x, this.y, '#bdf0ff', 2.0 * this.blastScale);
+      spawnDecal(this.x, this.y, R * 0.8, 6, '170,225,250', 0.2); // frost bloom
+    }
+    spawnPopText(this.x, this.y, icy ? 'FREEZE!' : 'KABOOM!', icy ? '#bdf0ff' : '#ffce54');
 
     for (const p of game.players) {
       if (!p.alive || p.invuln > 0) continue;
@@ -353,15 +357,22 @@ export class Boomerang {
     }
     const s = this.big ? 16 : this.transient ? 9 : 11;
     const col = this.bounceFlash > 0 ? '#fff' : this.origOwner.char.body;
-    // motion-blur streak: fading coloured pucks along the recent flight path
-    for (let i = 0; i < this.trail.length - 1; i++) {
-      const [tx, ty] = this.trail[i];
-      const a = (i + 1) / this.trail.length;
-      ctx.globalAlpha = a * 0.28;
-      ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.arc(tx, ty, s * 0.5 * a, 0, TAU);
-      ctx.fill();
+    // motion-blur ribbon: a tapered streak swept through the recent flight path
+    if (this.trail.length > 2) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (let i = 1; i < this.trail.length; i++) {
+        const k = i / this.trail.length;
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = k * 0.3;
+        ctx.lineWidth = s * 0.9 * k;
+        ctx.beginPath();
+        ctx.moveTo(this.trail[i - 1][0], this.trail[i - 1][1]);
+        ctx.lineTo(this.trail[i][0], this.trail[i][1]);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
     drawBoomShape(this.x, this.y, s, this.rot, col, true);

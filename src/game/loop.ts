@@ -1,8 +1,9 @@
-import { clearInputEdges, mouse } from '../core/input';
+import { clearInputEdges, keys, mouse } from '../core/input';
+import { audio } from '../core/audio';
 import { game } from './state';
 import { update } from './update';
 import { render } from './render';
-import { handleMenuClick } from '../ui/menu';
+import { handleMenuClick, handleMatchOverClick, handlePauseClick } from '../ui/menu';
 
 /** The requestAnimationFrame loop: fixed-cap dt, input edge handling, draw. */
 
@@ -13,13 +14,22 @@ function frame(now: number): void {
   last = now;
   dt = Math.min(dt, 0.033);
 
-  // global click handling for menus
-  if (mouse.downEdge) {
-    if (game.state === 'menu') handleMenuClick();
-    else if (game.state === 'matchover') {
-      game.state = 'menu';
-      game.matchWinner = null;
+  // Esc: pause the action / back out of menu sub-pages
+  if (keys['Escape_edge']) {
+    if (game.state === 'playing' || game.state === 'countdown' || game.state === 'roundover') {
+      game.paused = !game.paused;
+      audio.pause();
+    } else if (game.state === 'menu' && game.menuPage !== 'title') {
+      game.menuPage = 'title';
+      audio.tick();
     }
+  }
+
+  // global click handling for menus & overlays
+  if (mouse.downEdge) {
+    if (game.paused) handlePauseClick();
+    else if (game.state === 'menu') handleMenuClick();
+    else if (game.state === 'matchover') handleMatchOverClick();
   }
 
   update(dt);

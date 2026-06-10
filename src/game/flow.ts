@@ -13,8 +13,13 @@ import { game } from './state';
 
 function buildPlayers(): void {
   game.players = [];
-  // shuffle the full character roster + spawn order
+  // shuffle the roster + spawn order; the human's picked fighter (if any)
+  // is pulled to the front so player 0 always gets it
   const idxs = CHARS.map((_, i) => i).sort(() => Math.random() - 0.5);
+  if (game.charSel >= 0 && game.charSel < CHARS.length) {
+    idxs.splice(idxs.indexOf(game.charSel), 1);
+    idxs.unshift(game.charSel);
+  }
   const spawnsOrder = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
   for (let i = 0; i < game.numPlayers; i++) {
     const p = new Player(idxs[i], spawnsOrder[i], i !== 0);
@@ -199,7 +204,9 @@ export function spawnPickup(): void {
   // first of a match, so a fresh player isn't blindsided by mystery controls
   const pool = game.pickupsSpawned === 0 ? POWER_KEYS.filter((k) => !NEVER_FIRST.includes(k)) : POWER_KEYS;
   const type = pool[randi(0, pool.length - 1)];
-  // find free location
+  // find free location — clear of solids, pits, gate slots, crusher sweeps,
+  // fighters and other books (a book may still land inside a gated vault:
+  // that's deliberate treasure, someone has to work the switch for it)
   for (let tries = 0; tries < 30; tries++) {
     const x = rand(BOUNDS.l + 50, BOUNDS.r - 50);
     const y = rand(BOUNDS.t + 50, BOUNDS.b - 50);
@@ -209,6 +216,16 @@ export function spawnPickup(): void {
     }
     for (const P of PITS) {
       if (x > P.x - 30 && x < P.x + P.w + 30 && y > P.y - 30 && y < P.y + P.h + 30) ok = false;
+    }
+    for (const G of GATES) {
+      if (x > G.x - 26 && x < G.x + G.w + 26 && y > G.y - 26 && y < G.y + G.h + 26) ok = false;
+    }
+    for (const C of CRUSHERS) {
+      const x0 = Math.min(C.x, C.x + C.dx) - 24;
+      const y0 = Math.min(C.y, C.y + C.dy) - 24;
+      const x1 = Math.max(C.x + C.w, C.x + C.dx + C.w) + 24;
+      const y1 = Math.max(C.y + C.h, C.y + C.dy + C.h) + 24;
+      if (x > x0 && x < x1 && y > y0 && y < y1) ok = false;
     }
     for (const p of game.players) if (p.alive && dist(x, y, p.x, p.y) < 90) ok = false;
     for (const pk of game.pickups) if (dist(x, y, pk.x, pk.y) < 80) ok = false;

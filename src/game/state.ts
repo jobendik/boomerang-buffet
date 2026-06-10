@@ -5,6 +5,7 @@ import type { Particle } from '../entities/Particle';
 import type { FirePatch } from '../entities/FirePatch';
 import type { IcePatch } from '../entities/IcePatch';
 import type { Crusher } from '../entities/Crusher';
+import type { PowerKey } from '../data/powers';
 import type { Vec2 } from '../types';
 
 /**
@@ -57,6 +58,26 @@ export interface GateState {
 
 export type GamePhase = 'menu' | 'countdown' | 'playing' | 'roundover' | 'matchover';
 
+/** Which screen the menu phase is showing. */
+export type MenuPage = 'title' | 'setup' | 'help';
+
+/** A short-lived HUD notice shown when the human grabs a power book. */
+export interface Toast {
+  key: PowerKey;
+  t: number; // age in seconds (fades out toward TOAST_LIFE)
+}
+
+/** A fading mark left on the floor (scorches, frost rings). */
+export interface Decal {
+  x: number;
+  y: number;
+  r: number;
+  t: number; // remaining life
+  max: number;
+  rgb: string; // 'r,g,b' triplet — alpha is animated separately
+  alpha: number; // peak opacity
+}
+
 /** The Golden Boomerang objective (only present in Golden mode). */
 export interface Golden {
   x: number;
@@ -84,6 +105,8 @@ export interface BattleRoyale {
 
 export interface GameState {
   state: GamePhase;
+  menuPage: MenuPage; // which menu screen is showing while state === 'menu'
+  paused: boolean; // Esc pause during countdown/playing
   players: Player[];
   boomerangs: Boomerang[];
   pickups: Pickup[];
@@ -93,16 +116,21 @@ export interface GameState {
   decoys: Decoy[]; // DECOY clones currently fooling the bots
   switches: SwitchState[]; // live floor switches for the current arena
   gates: GateState[]; // live gates, opened by their switches
+  decals: Decal[]; // fading floor marks (scorches, frost)
+  toasts: Toast[]; // power-pickup notices for the human player
   raining: boolean; // weather: douses fire on contact (pit-free maps only)
   time: number;
   shake: number;
   hitstop: number;
+  slowmo: number; // remaining real-time seconds of cinematic slow motion
+  fightT: number; // remaining life of the "FIGHT!" flash after countdown
   numPlayers: number;
   difficulty: number;
   target: number;
   arenaSel: number; // -1 = random each round, else fixed ARENAS index
   mode: number; // 0 = Free-for-all, 1 = Team Up, 2 = Golden Boomerang, 3 = Hide & Seek
   fallProtect: number; // pit accessibility: 0 = Off, 1 = Gentle, 2 = Extreme
+  charSel: number; // the human's chosen fighter (-1 = random)
   golden: Golden | null;
   goldTarget: number; // seconds of carrying needed to win Golden mode
   br: BattleRoyale | null; // active Battle Royale event, if any
@@ -116,13 +144,12 @@ export interface GameState {
   pickupTimer: number;
   pickupsSpawned: number; // match-cumulative count; gates "never first" books
   roundNum: number;
-  menuSel: number;
-  flashText: string;
-  flashT: number;
 }
 
 export const game: GameState = {
   state: 'menu',
+  menuPage: 'title',
+  paused: false,
   players: [],
   boomerangs: [],
   pickups: [],
@@ -132,16 +159,21 @@ export const game: GameState = {
   decoys: [],
   switches: [],
   gates: [],
+  decals: [],
+  toasts: [],
   raining: false,
   time: 0,
   shake: 0,
   hitstop: 0,
+  slowmo: 0,
+  fightT: 0,
   numPlayers: 4,
   difficulty: 1,
   target: 5,
   arenaSel: -1,
   mode: 0,
-  fallProtect: 0,
+  fallProtect: 1, // Gentle by default — friendlier first run, still dangerous
+  charSel: -1,
   golden: null,
   goldTarget: 14,
   br: null,
@@ -155,7 +187,43 @@ export const game: GameState = {
   pickupTimer: 4,
   pickupsSpawned: 0,
   roundNum: 0,
-  menuSel: 0, // for hover
-  flashText: '',
-  flashT: 0,
 };
+
+/* ----------------------- settings persistence ----------------------------- */
+
+const SAVE_KEY = 'boomerang-buffet-settings-v1';
+const SAVED_FIELDS = ['numPlayers', 'difficulty', 'target', 'arenaSel', 'mode', 'fallProtect', 'charSel'] as const;
+
+/** Persist the menu selections so a returning player keeps their setup. */
+export function saveSettings(): void {
+  try {
+    const out: Record<string, number> = {};
+    for (const k of SAVED_FIELDS) out[k] = game[k];
+    localStorage.setItem(SAVE_KEY, JSON.stringify(out));
+  } catch {
+    /* storage unavailable (private mode etc.) — settings just won't stick */
+  }
+}
+
+/** Restore persisted selections (validated; bad values fall back to defaults). */
+export function loadSettings(): void {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    for (const k of SAVED_FIELDS) {
+      const v = data[k];
+      if (typeof v === 'number' && Number.isFinite(v)) game[k] = v;
+    }
+    // clamp into legal ranges in case the save predates a balance change
+    game.numPlayers = Math.min(6, Math.max(2, Math.round(game.numPlayers)));
+    game.difficulty = Math.min(2, Math.max(0, Math.round(game.difficulty)));
+    game.target = Math.min(9, Math.max(1, Math.round(game.target)));
+    game.mode = Math.min(3, Math.max(0, Math.round(game.mode)));
+    game.fallProtect = Math.min(2, Math.max(0, Math.round(game.fallProtect)));
+  } catch {
+    /* corrupted save — ignore */
+  }
+}
+
+loadSettings();

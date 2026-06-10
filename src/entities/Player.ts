@@ -3,11 +3,11 @@ import { audio } from '../core/audio';
 import { clamp, dist, lerp, norm, rand, TAU } from '../core/math';
 import { BOUNDS, SLASH_RANGE, SLASH_HALF } from '../constants';
 import { CHARS } from '../data/characters';
-import { SPAWNS } from '../data/arena';
+import { arena, OBSTACLES, SPAWNS } from '../data/arena';
 import { POWERS, EXCLUSIVE_GROUPS, type PowerKey } from '../data/powers';
 import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
-import { resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
-import { spawnDashPuff, spawnExplosion, spawnRing, spawnSlice } from '../systems/effects';
+import { circleRect, resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
+import { spawnDashPuff, spawnExplosion, spawnFootDust, spawnPopText, spawnRing, spawnSlice } from '../systems/effects';
 import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
 import { Particle } from './Particle';
@@ -107,6 +107,9 @@ export class Player {
   spawnFlash!: number;
   bob!: number;
   shieldFlash!: number;
+  moveK!: number; // 0 idle … 1 running, smoothed (drives the walk wobble)
+  dustT!: number; // footstep dust cadence
+  squashT!: number; // landing/dash squash timer (visual)
   disguised!: boolean; // DISGUISE: held still long enough to look like scenery
   disguiseT!: number; // seconds of stillness accumulated toward disguising
   propIdx!: number; // which scenery prop we currently masquerade as
@@ -190,6 +193,9 @@ export class Player {
     this.spawnFlash = 0.6;
     this.bob = rand(0, TAU);
     this.shieldFlash = 0;
+    this.moveK = 0;
+    this.dustT = 0;
+    this.squashT = 0;
     this.disguised = false;
     this.disguiseT = 0;
     this.propIdx = 0;
@@ -301,6 +307,7 @@ export class Player {
       if (this.airT <= 0) {
         this.jumpZ = 0;
         this.invuln = Math.max(this.invuln, 0.12); // brief landing grace
+        this.squashT = 0.18; // touchdown squash
         spawnDashPuff(this.x, this.y, this.aim, this.char.body); // touchdown puff
       }
     }
@@ -361,7 +368,7 @@ export class Player {
         const src = this.burnSource;
         if (src && src !== this) src.stats.burnKills++;
         const dir: Vec2 = [rand(-1, 1), rand(-1, 1)];
-        this.die(src, dir[0], dir[1]);
+        this.die(src, dir[0], dir[1], false, 'TOASTED!');
         return;
       }
     }
@@ -405,8 +412,20 @@ export class Player {
       const [mx, my] = intents.move;
       const target = norm(mx, my);
       const goal = mx || my ? [target[0] * baseSpeed, target[1] * baseSpeed] : [0, 0];
-      this.vx = lerp(this.vx, goal[0], 1 - Math.pow(0.0009, dt));
-      this.vy = lerp(this.vy, goal[1], 1 - Math.pow(0.0009, dt));
+      // slick (icy) arenas converge far slower — momentum carries you around
+      const grip = arena.slick && !this.airborne ? 0.16 : 0.0009;
+      this.vx = lerp(this.vx, goal[0], 1 - Math.pow(grip, dt));
+      this.vy = lerp(this.vy, goal[1], 1 - Math.pow(grip, dt));
+    }
+
+    // walk-cycle blend + footstep dust while running on the ground
+    const runSpeed = Math.hypot(this.vx, this.vy);
+    this.moveK = lerp(this.moveK, runSpeed > 60 ? 1 : 0, 1 - Math.pow(0.001, dt));
+    if (this.squashT > 0) this.squashT = Math.max(0, this.squashT - dt);
+    this.dustT -= dt;
+    if (runSpeed > 170 && !this.airborne && this.dashT <= 0 && this.dustT <= 0) {
+      this.dustT = 0.16;
+      spawnFootDust(this.x, this.y + this.r * 0.8);
     }
 
     // frozen fighters mash dash to crack the ice apart and break free early
@@ -421,7 +440,7 @@ export class Player {
       this.airT = JUMP_TIME;
       this.airCd = JUMP_CD;
       this.invuln = Math.max(this.invuln, JUMP_TIME);
-      audio.dash();
+      audio.jump();
       spawnDashPuff(this.x, this.y, this.aim, this.char.body);
     }
 
@@ -436,6 +455,7 @@ export class Player {
         this.dashT = 0.17;
         this.dashCd = caffeinated ? 0.22 : 0.7; // Caffeinated greatly cuts dash cooldown
         this.invuln = Math.max(this.invuln, 0.26);
+        this.squashT = 0.16; // a kick of stretch as the dash fires
         audio.dash();
         spawnDashPuff(this.x, this.y, d, this.char.body);
         // DECOY: leave a look-alike clone behind at the spot we just bolted from
@@ -728,19 +748,20 @@ export class Player {
     audio.freeze();
     // route through die() for the shared bookkeeping (death count, GHOST, etc.).
     // Flagged environmental: a pit ignores DELAYED DEATH (you're simply gone).
-    this.die(null, 0, 0, true);
+    this.die(null, 0, 0, true, 'GONE!');
   }
 
   /** Squished by a kinematic block — an environmental death, no killer. */
   crush(): void {
     if (!this.alive || this.invuln > 0) return;
     game.shake = Math.max(game.shake, 16);
-    this.die(null, 0, -1, true); // environmental: Shield still saves, DELAYED doesn't
+    this.die(null, 0, -1, true, 'CRUSHED!'); // environmental: Shield still saves, DELAYED doesn't
     if (!this.alive) this.stats.crushDeaths++; // count only an actual squish
   }
 
-  /** `environmental` deaths (pits, crushers) bypass the DELAYED DEATH reprieve. */
-  die(killer: Player | null, dirx: number, diry: number, environmental = false): void {
+  /** `environmental` deaths (pits, crushers) bypass the DELAYED DEATH reprieve.
+   *  `pop` overrides the floating word shown at the death site. */
+  die(killer: Player | null, dirx: number, diry: number, environmental = false, pop?: string): void {
     if (!this.alive) return;
     // Shield intercepts the next lethal hit instead of dying.
     if (this.powers.has('SHIELD')) {
@@ -793,9 +814,18 @@ export class Player {
     this.frozen = 0;
     audio.slice();
     spawnSlice(this.x, this.y, this.char, dirx, diry);
+    spawnPopText(this.x, this.y, pop ?? (wasFrozen ? 'SHATTERED!' : 'SLICED!'), wasFrozen ? '#bdf0ff' : '#fff3df');
     if (wasFrozen) spawnRing(this.x, this.y, '#bdf0ff', 1.3); // the ice block shatters
     game.shake = Math.max(game.shake, 14);
     game.hitstop = Math.max(game.hitstop, 0.09);
+
+    // cinematic beats: a brief slow-mo when a kill decides the round, or when
+    // the Golden Boomerang carrier scores one (the blueprint's time-dilation)
+    if (game.state === 'playing') {
+      const left = game.players.filter((q) => q.alive).length;
+      if (left === 1 && game.players.length > 1) game.slowmo = Math.max(game.slowmo, 0.75);
+      if (killer && killer.isGoldCarrier) game.slowmo = Math.max(game.slowmo, 0.6);
+    }
 
     // OUT WITH A BANG: detonate on death, taking nearby foes with you.
     // `alive` is already false, so the blast can't recursively re-kill us.
@@ -846,6 +876,13 @@ export class Player {
 
     ctx.save();
     ctx.translate(this.x, this.y + bobY - this.jumpZ);
+
+    // body language: spawn pop-in, dash/land squash, and a jaunty run wobble
+    const grow = 1 - this.spawnFlash / 0.6; // 0 just spawned … 1 settled
+    const popScale = Math.min(1, 0.4 + grow * 0.6) + Math.sin(Math.min(1, grow) * Math.PI) * 0.14;
+    const sq = this.squashT > 0 ? this.squashT / 0.18 : 0;
+    ctx.rotate(Math.sin(this.bob * 1.35) * 0.055 * this.moveK);
+    ctx.scale(popScale * (1 + sq * 0.16), popScale * (1 - sq * 0.18));
 
     // stacked power auras (one faint ring per active modifier)
     let ringIdx = 0;
@@ -962,6 +999,9 @@ export class Player {
         ctx.arc(this.x, hbY, this.r + 14, a - this.charge * 1.5, a + this.charge * 1.5);
         ctx.stroke();
       }
+      // human-only: dotted flight preview while charging, so banked curve
+      // throws are aimable instead of guesswork
+      if (!this.isAI && this.charging && this.charge > 0.04) this.drawThrowPreview();
     }
     // respawn pip(s)
     for (let i = 0; i < this.respawns.length; i++) {
@@ -970,5 +1010,60 @@ export class Player {
       ctx.arc(this.x + (i - (this.respawns.length - 1) / 2) * 9, this.y - this.r - 8, 3, 0, TAU * (1 - this.respawns[i] / RESPAWN_TIME));
       ctx.fill();
     }
+  }
+
+  /** Simulate the charged throw with the live flight maths and dot its path,
+   *  stopping at the first wall/obstacle the boomerang would bounce off. */
+  private drawThrowPreview(): void {
+    const charge = clamp(this.charge, 0.12, 1);
+    const speed = (430 + charge * 230) * (this.powers.has('BIG') ? 0.85 : 1);
+    let outT = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
+    const curve = this.powers.has('TELEKINESIS') ? 0 : BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE);
+    let px = this.x + this.aim[0] * (this.r + 6);
+    let py = this.y + this.aim[1] * (this.r + 6);
+    let vx = this.aim[0] * speed;
+    let vy = this.aim[1] * speed;
+    const step = 1 / 50;
+    const solids = game.gates.length ? [...OBSTACLES, ...game.gates.filter((g) => !g.open)] : OBSTACLES;
+    ctx.save();
+    const hue = lerp(60, 0, charge);
+    let i = 0;
+    let blocked = false;
+    while (outT > 0 && !blocked) {
+      const c = Math.cos(curve * step);
+      const s = Math.sin(curve * step);
+      const nvx = vx * c - vy * s;
+      vy = vx * s + vy * c;
+      vx = nvx;
+      px += vx * step;
+      py += vy * step;
+      outT -= step;
+      if (px < BOUNDS.l + 11 || px > BOUNDS.r - 11 || py < BOUNDS.t + 11 || py > BOUNDS.b - 11) blocked = true;
+      else {
+        for (const R of solids) {
+          if (circleRect(px, py, 11, R).hit) {
+            blocked = true;
+            break;
+          }
+        }
+      }
+      if (!blocked && i % 2 === 0) {
+        const fade = 0.5 - i * 0.006;
+        if (fade > 0.08) {
+          ctx.fillStyle = `hsla(${hue},100%,68%,${fade})`;
+          ctx.beginPath();
+          ctx.arc(px, py, 2.6, 0, TAU);
+          ctx.fill();
+        }
+      }
+      i++;
+    }
+    // terminus marker: bounce point or the turn-back apex
+    ctx.strokeStyle = `hsla(${hue},100%,70%,.55)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, blocked ? 5 : 7, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
   }
 }
