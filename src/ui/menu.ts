@@ -411,33 +411,38 @@ function drawSetup(): void {
   ctx.fillStyle = 'rgba(255,243,223,.45)';
   ctx.font = fontB(10, 700);
   ctx.textAlign = 'left';
-  ctx.fillText(`you + ${game.numPlayers - 1} cpu`, sx, 316);
+  ctx.fillText(`${game.numHumans} human + ${game.numPlayers - game.numHumans} cpu`, sx, 316);
   stepper(sx, 330, sw, 'WIN SCORE', `${game.target}`, 'target');
+  stepper(sx, 364, sw, 'LOCAL PLAYERS', `${game.numHumans}`, 'humans');
+  ctx.fillStyle = 'rgba(255,243,223,.45)';
+  ctx.font = fontB(10, 700);
+  ctx.textAlign = 'left';
+  ctx.fillText(['mouse + arrows', '+ WASD keys', '+ IJKL keys', '+ gamepad'][Math.min(3, game.numHumans - 1)], sx, 398);
 
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(12, 900);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('CPU SKILL', sx, 380);
-  segmented(sx, 390, sw, 26, DIFF_NAMES, game.difficulty, 'diff');
+  ctx.fillText('CPU SKILL', sx, 424);
+  segmented(sx, 434, sw, 26, DIFF_NAMES, game.difficulty, 'diff');
 
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(12, 900);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('PIT SAFETY', rx, 436);
-  segmented(rx, 446, 240, 26, FALL_NAMES, game.fallProtect, 'fall');
+  ctx.fillText('PIT SAFETY', rx, 470);
+  segmented(rx, 480, 240, 26, FALL_NAMES, game.fallProtect, 'fall');
   ctx.fillStyle = 'rgba(255,243,223,.45)';
   ctx.font = fontB(11, 700);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(['pits are lethal', 'pit edges nudge you back', 'pits become solid walls'][game.fallProtect], rx, 494);
+  ctx.fillText(['pits are lethal', 'pit edges nudge you back', 'pits become solid walls'][game.fallProtect], rx, 528);
 
   // Hide & Seek plays best with a full lobby — gentle hint
   if (game.mode === 3 && game.numPlayers < 4) {
     ctx.fillStyle = 'rgba(255,206,84,.75)';
     ctx.font = fontB(12, 700);
-    ctx.fillText('tip: Hide & Seek shines with 4+ fighters', rx, 522);
+    ctx.fillText('tip: Hide & Seek shines with 4+ fighters', rx, 543);
   }
 
   btn(40, 572, 140, 52, 'BACK', 'back', { px: 20 });
@@ -472,13 +477,35 @@ function drawHelp(): void {
     ['M', 'Mute'],
   ];
   controls.forEach(([k, label], i) => {
-    const y = 128 + i * 35;
+    const y = 126 + i * 30;
     keycap(56, y, k, 22);
     ctx.fillStyle = UI.cream;
     ctx.font = fontB(13, 700);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, 148, y + 11);
+  });
+
+  // Up to 4 players locally: P1 above (mouse), P2-P4 below (no mouse needed —
+  // they face the way they last moved).
+  ctx.fillStyle = UI.dim;
+  ctx.font = fontB(11, 900);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('LOCAL MULTIPLAYER (SETUP → LOCAL PLAYERS)', 56, 372);
+  const localPlayers: [string, string][] = [
+    ['P2 · WASD', 'move · V throw · X slash · C dash · Z jump'],
+    ['P3 · IJKL', 'move · , throw · O slash · U dash · N jump'],
+    ['P4 · gamepad', 'e.g. PS5 controller — sticks move/aim, face buttons act'],
+  ];
+  localPlayers.forEach(([k, label], i) => {
+    const y = 384 + i * 15;
+    ctx.fillStyle = UI.gold;
+    ctx.font = fontB(10.5, 800);
+    ctx.fillText(k, 56, y);
+    ctx.fillStyle = 'rgba(255,243,223,.7)';
+    ctx.font = fontB(10.5, 700);
+    ctx.fillText(label, 150, y);
   });
 
   /* rules */
@@ -607,9 +634,16 @@ export function handleMenuClick(): void {
         break;
       case 'players-':
         game.numPlayers = clamp(game.numPlayers - 1, 2, 6);
+        game.numHumans = Math.min(game.numHumans, game.numPlayers, 4);
         break;
       case 'players+':
         game.numPlayers = clamp(game.numPlayers + 1, 2, 6);
+        break;
+      case 'humans-':
+        game.numHumans = clamp(game.numHumans - 1, 1, Math.min(4, game.numPlayers));
+        break;
+      case 'humans+':
+        game.numHumans = clamp(game.numHumans + 1, 1, Math.min(4, game.numPlayers));
         break;
       case 'target-':
         game.target = clamp(game.target - 1, 1, 9);
