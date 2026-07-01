@@ -22,9 +22,15 @@ npm run typecheck
 
 ## Controls
 
+Up to 4 fighters can be controlled locally at once (set **Local Players** on
+the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
+(they simply face the way they last moved), and P4 is a connected gamepad.
+
+**P1 — mouse + keyboard**
+
 | Action | Input |
 | ------ | ----- |
-| Move   | `WASD` / Arrow keys |
+| Move   | `WASD` / Arrow keys (Arrow keys only once a 2nd local player joins) |
 | Aim    | Mouse (custom crosshair; charging shows the predicted flight path) |
 | Throw  | Left-Click — **hold to charge & bank the curve** |
 | Slash  | Right-Click / `E` — melee kill **and** clash/parry incoming boomerangs |
@@ -32,6 +38,37 @@ npm run typecheck
 | Hop    | `Shift` / `F` — a vertical dodge over boomerangs, foes and pits |
 | Pause  | `Esc` |
 | Mute   | `M` |
+
+**P2 — keyboard (WASD)**
+
+| Action | Input |
+| ------ | ----- |
+| Move   | `W` `A` `S` `D` |
+| Throw  | `V` (hold to charge) |
+| Slash  | `X` |
+| Dash   | `C` |
+| Hop    | `Z` |
+
+**P3 — keyboard (IJKL)**
+
+| Action | Input |
+| ------ | ----- |
+| Move   | `I` `J` `K` `L` |
+| Throw  | `,` (comma, hold to charge) |
+| Slash  | `O` |
+| Dash   | `U` |
+| Hop    | `N` |
+
+**P4 — gamepad** (any standard-mapping controller, e.g. a PS5 DualSense)
+
+| Action | Input |
+| ------ | ----- |
+| Move   | Left stick |
+| Aim    | Right stick (falls back to facing the move direction if left centered) |
+| Throw  | Cross/A or right trigger (hold to charge) |
+| Slash  | Circle/B |
+| Dash   | Square/X or right bumper |
+| Hop    | Triangle/Y |
 
 ## Core mechanics (modelled on *Boomerang Fu*)
 

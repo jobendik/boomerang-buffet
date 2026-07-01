@@ -125,6 +125,10 @@ export interface GameState {
   slowmo: number; // remaining real-time seconds of cinematic slow motion
   fightT: number; // remaining life of the "FIGHT!" flash after countdown
   numPlayers: number;
+  /** How many of the fighters are locally controlled humans (1-4): P1 uses
+   *  mouse + arrows, P2 the ASDW keys, P3 the IJKL ("JLKI") keys, P4 a
+   *  connected gamepad (e.g. a PS5 controller). Any remainder are CPUs. */
+  numHumans: number;
   difficulty: number;
   target: number;
   arenaSel: number; // -1 = random each round, else fixed ARENAS index
@@ -168,6 +172,7 @@ export const game: GameState = {
   slowmo: 0,
   fightT: 0,
   numPlayers: 4,
+  numHumans: 1,
   difficulty: 1,
   target: 5,
   arenaSel: -1,
@@ -192,7 +197,7 @@ export const game: GameState = {
 /* ----------------------- settings persistence ----------------------------- */
 
 const SAVE_KEY = 'boomerang-buffet-settings-v1';
-const SAVED_FIELDS = ['numPlayers', 'difficulty', 'target', 'arenaSel', 'mode', 'fallProtect', 'charSel'] as const;
+const SAVED_FIELDS = ['numPlayers', 'numHumans', 'difficulty', 'target', 'arenaSel', 'mode', 'fallProtect', 'charSel'] as const;
 
 /** Persist the menu selections so a returning player keeps their setup. */
 export function saveSettings(): void {
@@ -217,6 +222,7 @@ export function loadSettings(): void {
     }
     // clamp into legal ranges in case the save predates a balance change
     game.numPlayers = Math.min(6, Math.max(2, Math.round(game.numPlayers)));
+    game.numHumans = Math.min(4, game.numPlayers, Math.max(1, Math.round(game.numHumans)));
     game.difficulty = Math.min(2, Math.max(0, Math.round(game.difficulty)));
     game.target = Math.min(9, Math.max(1, Math.round(game.target)));
     game.mode = Math.min(3, Math.max(0, Math.round(game.mode)));

@@ -22,7 +22,7 @@ function buildPlayers(): void {
   }
   const spawnsOrder = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
   for (let i = 0; i < game.numPlayers; i++) {
-    const p = new Player(idxs[i], spawnsOrder[i], i !== 0);
+    const p = new Player(idxs[i], spawnsOrder[i], i >= game.numHumans);
     // Team Up: split the lobby into two squads (you always lead team 0)
     p.team = game.mode === 1 ? i % 2 : -1;
     game.players.push(p);

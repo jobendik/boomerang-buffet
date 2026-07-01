@@ -13,6 +13,14 @@ import type { Player } from '../entities/Player';
 
 const TEAM_COLORS = ['#5ad1ff', '#ff7ad0'];
 
+/** Label for a local human's card/locator: "YOU" when solo, else "P1"-"P4"
+ *  matching their control-scheme slot (see `humanIntents` in game/update.ts). */
+function humanLabel(p: Player): string {
+  if (game.numHumans <= 1) return 'YOU';
+  const slot = game.players.indexOf(p);
+  return `P${slot + 1}`;
+}
+
 function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
   ctx.save();
   ctx.translate(x, y);
@@ -26,8 +34,9 @@ function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
   ctx.lineWidth = 2;
   roundRectPath(0, 0, w, h, 12);
   ctx.stroke();
-  // the human's card gets a little gold "YOU" tab
+  // the human's card gets a little gold "YOU"/"P#" tab
   if (!p.isAI) {
+    const tab = humanLabel(p);
     ctx.fillStyle = UI.gold;
     roundRectPath(10, -5, 34, 10, 5);
     ctx.fill();
@@ -35,7 +44,7 @@ function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
     ctx.font = fontB(8, 900);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('YOU', 27, 0.5);
+    ctx.fillText(tab, 27, 0.5);
   }
   // Team Up: a coloured stripe down the card's left edge marks the squad
   if (game.mode === 1 && p.team >= 0) {
@@ -75,7 +84,8 @@ function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
   ctx.font = fontB(12, 800);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(p.isAI ? p.char.name : 'You', 46, 14);
+  const name = p.isAI ? p.char.name : game.numHumans <= 1 ? 'You' : humanLabel(p);
+  ctx.fillText(name, 46, 14);
 
   if (game.mode === 2) {
     // Golden mode: a hold-progress bar toward the win
@@ -224,32 +234,34 @@ export function drawHUD(): void {
   }
 
   const me = game.players.find((p) => !p.isAI);
-  if (me && me.alive) {
-    drawAbilityChips(me);
-    // a "YOU" locator floats over your fighter through the round's opening
-    // (flipping below them when they spawn close to the scoreboard band)
-    if (game.state === 'countdown' || game.fightT > 0) {
-      const below = me.y < 150;
+  if (me && me.alive) drawAbilityChips(me);
+  // a "YOU"/"P#" locator floats over each local human through the round's
+  // opening (flipping below them when they spawn close to the scoreboard band)
+  if (game.state === 'countdown' || game.fightT > 0) {
+    for (const p of game.players) {
+      if (p.isAI || !p.alive) continue;
+      const label = humanLabel(p);
+      const below = p.y < 150;
       const bob = Math.sin(game.time * 5) * 3;
-      const yy = below ? me.y + me.r + 36 + bob : me.y - me.r - 26 + bob;
+      const yy = below ? p.y + p.r + 36 + bob : p.y - p.r - 26 + bob;
       ctx.save();
       ctx.font = fontD(15);
       ctx.textAlign = 'center';
       ctx.lineWidth = 4;
       ctx.lineJoin = 'round';
       ctx.strokeStyle = UI.ink;
-      ctx.strokeText('YOU', me.x, yy);
+      ctx.strokeText(label, p.x, yy);
       ctx.fillStyle = UI.gold;
-      ctx.fillText('YOU', me.x, yy);
+      ctx.fillText(label, p.x, yy);
       ctx.beginPath();
       if (below) {
-        ctx.moveTo(me.x - 5, yy - 16);
-        ctx.lineTo(me.x + 5, yy - 16);
-        ctx.lineTo(me.x, yy - 23);
+        ctx.moveTo(p.x - 5, yy - 16);
+        ctx.lineTo(p.x + 5, yy - 16);
+        ctx.lineTo(p.x, yy - 23);
       } else {
-        ctx.moveTo(me.x - 5, yy + 4);
-        ctx.lineTo(me.x + 5, yy + 4);
-        ctx.lineTo(me.x, yy + 11);
+        ctx.moveTo(p.x - 5, yy + 4);
+        ctx.lineTo(p.x + 5, yy + 4);
+        ctx.lineTo(p.x, yy + 11);
       }
       ctx.closePath();
       ctx.fillStyle = UI.gold;

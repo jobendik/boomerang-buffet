@@ -1,7 +1,7 @@
 import { audio } from '../core/audio';
 import { W } from '../constants';
 import { dist, lerp, norm, rand, TAU } from '../core/math';
-import { keys, mouse } from '../core/input';
+import { keys, mouse, readGamepad } from '../core/input';
 import { aiThink } from '../systems/ai';
 import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
 import { spawnConfetti, spawnRing } from '../systems/effects';
@@ -9,7 +9,7 @@ import { POWERS } from '../data/powers';
 import { Particle } from '../entities/Particle';
 import { game } from './state';
 import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
-import type { Intents } from '../types';
+import type { Intents, Vec2 } from '../types';
 import type { Player } from '../entities/Player';
 
 /** Battle Royale: shrink the safe circle and purge hostiles caught outside. */
@@ -75,13 +75,16 @@ function updateGolden(dt: number): void {
 
 /** Per-frame simulation step and human input translation. */
 
-function humanIntents(p: Player): Intents {
+/** P1: mouse aim/throw + arrow keys (also WASD, when solo — freed up for P2's
+ *  ASDW scheme once local multiplayer is active). */
+function mouseIntents(p: Player): Intents {
   let mx = 0;
   let my = 0;
-  if (keys['KeyW'] || keys['ArrowUp']) my -= 1;
-  if (keys['KeyS'] || keys['ArrowDown']) my += 1;
-  if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
-  if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
+  const soloWASD = game.numHumans <= 1; // WASD only doubles as P1's move keys in single-human play
+  if (keys['ArrowUp'] || (soloWASD && keys['KeyW'])) my -= 1;
+  if (keys['ArrowDown'] || (soloWASD && keys['KeyS'])) my += 1;
+  if (keys['ArrowLeft'] || (soloWASD && keys['KeyA'])) mx -= 1;
+  if (keys['ArrowRight'] || (soloWASD && keys['KeyD'])) mx += 1;
   const aim = norm(mouse.x - p.x, mouse.y - p.y);
   return {
     move: [mx, my],
@@ -92,6 +95,82 @@ function humanIntents(p: Player): Intents {
     slash: mouse.rdown || keys['KeyE'],
     jump: keys['ShiftLeft'] || keys['ShiftRight'] || keys['KeyF'],
   };
+}
+
+interface KeyScheme {
+  up: string;
+  down: string;
+  left: string;
+  right: string;
+  throwKey: string;
+  slash: string;
+  dash: string;
+  jump: string;
+}
+
+/** P2: the "ASDW" keys (W/A/S/D) — the classic move set, freed from P1 once
+ *  a second local human joins — plus a Z/X/C/V action cluster. */
+const ASDW_SCHEME: KeyScheme = { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'KeyZ', slash: 'KeyX', dash: 'KeyC', throwKey: 'KeyV' };
+
+/** P3: the "JLKI" keys (I/J/K/L) — same diamond shape as WASD, shifted onto
+ *  the right hand — plus a U/O/N/comma action cluster. */
+const JLKI_SCHEME: KeyScheme = { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', jump: 'KeyN', slash: 'KeyO', dash: 'KeyU', throwKey: 'Comma' };
+
+/** No mouse for these local players — aim follows the last move direction
+ *  (or stays put, facing the way they last moved, while stationary). */
+function keyboardIntents(p: Player, s: KeyScheme): Intents {
+  let mx = 0;
+  let my = 0;
+  if (keys[s.up]) my -= 1;
+  if (keys[s.down]) my += 1;
+  if (keys[s.left]) mx -= 1;
+  if (keys[s.right]) mx += 1;
+  const aim: Vec2 = mx || my ? norm(mx, my) : p.aim;
+  return {
+    move: [mx, my],
+    aimX: aim[0],
+    aimY: aim[1],
+    throwHeld: keys[s.throwKey],
+    dash: keys[s.dash],
+    slash: keys[s.slash],
+    jump: keys[s.jump],
+  };
+}
+
+/** P4 (and beyond): a connected gamepad — left stick to move, right stick to
+ *  aim (falling back to facing the move direction if the pad has no right
+ *  stick pushed), face buttons for throw/slash/dash/jump. Works with any
+ *  standard-mapping controller, including the PS5 DualSense. */
+function gamepadIntents(p: Player, padIndex: number): Intents {
+  const pad = readGamepad(padIndex);
+  if (!pad) return { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
+  const [mx, my] = pad.move;
+  const aim: Vec2 = pad.aim ? norm(pad.aim[0], pad.aim[1]) : mx || my ? norm(mx, my) : p.aim;
+  return {
+    move: [mx, my],
+    aimX: aim[0],
+    aimY: aim[1],
+    throwHeld: pad.throwHeld,
+    dash: pad.dash,
+    slash: pad.slash,
+    jump: pad.jump,
+  };
+}
+
+/** Dispatch a local player's slot (its index within `game.players`, since
+ *  humans always occupy the first `numHumans` slots) to its control scheme:
+ *  0 = mouse+keys, 1 = ASDW, 2 = JLKI, 3+ = gamepad. */
+function humanIntents(p: Player, slot: number): Intents {
+  switch (slot) {
+    case 0:
+      return mouseIntents(p);
+    case 1:
+      return keyboardIntents(p, ASDW_SCHEME);
+    case 2:
+      return keyboardIntents(p, JLKI_SCHEME);
+    default:
+      return gamepadIntents(p, slot - 3);
+  }
 }
 
 export function update(dt: number): void {
@@ -162,9 +241,10 @@ export function update(dt: number): void {
     const seekerKillsBefore = seeker ? seeker.stats.kills : 0;
 
     // players
-    for (const p of game.players) {
+    for (let i = 0; i < game.players.length; i++) {
+      const p = game.players[i];
       if (!p.alive) continue;
-      let intents = p.isAI ? aiThink(p, dt) : humanIntents(p);
+      let intents = p.isAI ? aiThink(p, dt) : humanIntents(p, i);
       // a blinded seeker is rooted in place during the setup window
       if (p === seeker && game.hsSetup > 0) intents = { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
       p.update(dt, intents);
