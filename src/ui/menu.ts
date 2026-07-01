@@ -417,7 +417,7 @@ function drawSetup(): void {
   ctx.fillStyle = 'rgba(255,243,223,.45)';
   ctx.font = fontB(10, 700);
   ctx.textAlign = 'left';
-  ctx.fillText(['mouse + arrows', '+ ASDW keys', '+ JLKI keys', '+ gamepad'][Math.min(3, game.numHumans - 1)], sx, 398);
+  ctx.fillText(['mouse + arrows', '+ WASD keys', '+ IJKL keys', '+ gamepad'][Math.min(3, game.numHumans - 1)], sx, 398);
 
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(12, 900);
@@ -494,8 +494,8 @@ function drawHelp(): void {
   ctx.textBaseline = 'alphabetic';
   ctx.fillText('LOCAL MULTIPLAYER (SETUP → LOCAL PLAYERS)', 56, 372);
   const localPlayers: [string, string][] = [
-    ['P2 · WASD', 'move · Z jump · X slash · C dash · V throw'],
-    ['P3 · IJKL', 'move · N jump · O slash · U dash · , throw'],
+    ['P2 · WASD', 'move · V throw · X slash · C dash · Z jump'],
+    ['P3 · IJKL', 'move · , throw · O slash · U dash · N jump'],
     ['P4 · gamepad', 'e.g. PS5 controller — sticks move/aim, face buttons act'],
   ];
   localPlayers.forEach(([k, label], i) => {

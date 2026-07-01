@@ -108,13 +108,13 @@ interface KeyScheme {
   jump: string;
 }
 
-/** P2: the "ASDW" keys (W/A/S/D) — the classic move set, freed from P1 once
- *  a second local human joins — plus a Z/X/C/V action cluster. */
-const ASDW_SCHEME: KeyScheme = { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'KeyZ', slash: 'KeyX', dash: 'KeyC', throwKey: 'KeyV' };
+/** P2: the WASD keys — the classic move set, freed from P1 once a second
+ *  local human joins — plus a Z/X/C/V action cluster. */
+const WASD_SCHEME: KeyScheme = { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'KeyZ', slash: 'KeyX', dash: 'KeyC', throwKey: 'KeyV' };
 
-/** P3: the "JLKI" keys (I/J/K/L) — same diamond shape as WASD, shifted onto
- *  the right hand — plus a U/O/N/comma action cluster. */
-const JLKI_SCHEME: KeyScheme = { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', jump: 'KeyN', slash: 'KeyO', dash: 'KeyU', throwKey: 'Comma' };
+/** P3: the IJKL keys — same diamond shape as WASD, shifted onto the right
+ *  hand — plus a U/O/N/comma action cluster. */
+const IJKL_SCHEME: KeyScheme = { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', jump: 'KeyN', slash: 'KeyO', dash: 'KeyU', throwKey: 'Comma' };
 
 /** No mouse for these local players — aim follows the last move direction
  *  (or stays put, facing the way they last moved, while stationary). */
@@ -165,9 +165,9 @@ function humanIntents(p: Player, slot: number): Intents {
     case 0:
       return mouseIntents(p);
     case 1:
-      return keyboardIntents(p, ASDW_SCHEME);
+      return keyboardIntents(p, WASD_SCHEME);
     case 2:
-      return keyboardIntents(p, JLKI_SCHEME);
+      return keyboardIntents(p, IJKL_SCHEME);
     default:
       return gamepadIntents(p, slot - 3);
   }
