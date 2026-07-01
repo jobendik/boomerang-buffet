@@ -9,7 +9,7 @@ import { POWERS, POWER_KEYS, type PowerKey } from '../data/powers';
 import { drawBoomShape, roundRectPath } from '../gfx/shapes';
 import { drawCrown, drawPowerIcon } from '../gfx/icons';
 import { button, fontB, fontD, keycap, panel, pill, titleText, UI } from './widgets';
-import { game, saveSettings } from '../game/state';
+import { game, saveSettings, sanitizeControlSchemes, MAX_CONTROL_SCHEME } from '../game/state';
 import { startMatch } from '../game/flow';
 import { computeAwards } from '../game/awards';
 import { drawArena } from './arena';
@@ -28,6 +28,8 @@ const MODE_DESC = [
 ];
 const DIFF_NAMES = ['Chill', 'Normal', 'Spicy'];
 const FALL_NAMES = ['Off', 'Gentle', 'Extreme'];
+/** Short chip labels for `game.controlSchemes` values (0-6). */
+const DEVICE_SHORT = ['Mouse', 'WASD', 'IJKL', 'Pad 1', 'Pad 2', 'Pad 3', 'Pad 4'];
 
 interface Hit {
   x: number;
@@ -310,10 +312,34 @@ function stepper(x: number, y: number, w: number, label: string, value: string, 
   ctx.fillText(value, x + w - bs - 32, y + 15);
 }
 
+/** One clickable chip per active local human, cycling that slot's assigned
+ *  input device (mouse/WASD/IJKL/gamepad) on click — so any combination of
+ *  keyboards & gamepads can be assigned to any player. */
+function controlChips(x: number, y: number, w: number, h: number, count: number): void {
+  if (count <= 0) return;
+  const gap = 4;
+  const cw = (w - gap * (count - 1)) / count;
+  for (let i = 0; i < count; i++) {
+    const cx = x + i * (cw + gap);
+    const hov = hot(cx, y, cw, h);
+    ctx.fillStyle = hov ? 'rgba(255,255,255,.24)' : 'rgba(255,255,255,.1)';
+    roundRectPath(cx, y, cw, h, 6);
+    ctx.fill();
+    ctx.fillStyle = hov ? UI.ink : UI.cream;
+    ctx.font = fontB(9.5, 800);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const scheme = game.controlSchemes[i] ?? i;
+    ctx.fillText(`P${i + 1} · ${DEVICE_SHORT[scheme] ?? '?'}`, cx + cw / 2, y + h / 2 + 1);
+    hits.push({ x: cx, y, w: cw, h, act: `ctrl:${i}` });
+  }
+}
+
 function drawSetup(): void {
   // sanitize persisted selections against the live data tables
   game.arenaSel = clamp(game.arenaSel, -1, ARENAS.length - 1);
   game.charSel = clamp(game.charSel, -1, CHARS.length - 1);
+  sanitizeControlSchemes();
 
   ctx.fillStyle = 'rgba(10,6,18,.72)';
   ctx.fillRect(0, 0, W, H);
@@ -414,10 +440,7 @@ function drawSetup(): void {
   ctx.fillText(`${game.numHumans} human + ${game.numPlayers - game.numHumans} cpu`, sx, 316);
   stepper(sx, 330, sw, 'WIN SCORE', `${game.target}`, 'target');
   stepper(sx, 364, sw, 'LOCAL PLAYERS', `${game.numHumans}`, 'humans');
-  ctx.fillStyle = 'rgba(255,243,223,.45)';
-  ctx.font = fontB(10, 700);
-  ctx.textAlign = 'left';
-  ctx.fillText(['mouse + arrows', '+ WASD keys', '+ IJKL keys', '+ gamepad'][Math.min(3, game.numHumans - 1)], sx, 398);
+  controlChips(sx, 396, sw, 20, Math.min(4, game.numHumans));
 
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(12, 900);
@@ -486,17 +509,17 @@ function drawHelp(): void {
     ctx.fillText(label, 148, y + 11);
   });
 
-  // Up to 4 players locally: P1 above (mouse), P2-P4 below (no mouse needed —
-  // they face the way they last moved).
+  // Up to 4 players locally, each independently assigned a device from
+  // SETUP → LOCAL PLAYERS (e.g. two gamepads + one keyboard player).
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(11, 900);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('LOCAL MULTIPLAYER (SETUP → LOCAL PLAYERS)', 56, 372);
+  ctx.fillText('LOCAL MULTIPLAYER (SETUP → LOCAL PLAYERS, TAP TO ASSIGN)', 56, 372);
   const localPlayers: [string, string][] = [
-    ['P2 · WASD', 'move · V throw · X slash · C dash · Z jump'],
-    ['P3 · IJKL', 'move · , throw · O slash · U dash · N jump'],
-    ['P4 · gamepad', 'e.g. PS5 controller — sticks move/aim, face buttons act'],
+    ['WASD', 'move · V throw · X slash · C dash · Z jump'],
+    ['IJKL', 'move · , throw · O slash · U dash · N jump'],
+    ['GAMEPAD', 'any slot, any pad — sticks move/aim, face buttons act'],
   ];
   localPlayers.forEach(([k, label], i) => {
     const y = 384 + i * 15;
@@ -645,6 +668,17 @@ export function handleMenuClick(): void {
       case 'humans+':
         game.numHumans = clamp(game.numHumans + 1, 1, Math.min(4, game.numPlayers));
         break;
+      case 'ctrl': {
+        const slot = parseInt(arg, 10);
+        const used = new Set(game.controlSchemes.slice(0, game.numHumans).filter((_, i) => i !== slot));
+        let next = game.controlSchemes[slot] ?? slot;
+        for (let step = 0; step <= MAX_CONTROL_SCHEME; step++) {
+          next = (next + 1) % (MAX_CONTROL_SCHEME + 1);
+          if (!used.has(next)) break;
+        }
+        game.controlSchemes[slot] = next;
+        break;
+      }
       case 'target-':
         game.target = clamp(game.target - 1, 1, 9);
         break;

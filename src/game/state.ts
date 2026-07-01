@@ -125,10 +125,16 @@ export interface GameState {
   slowmo: number; // remaining real-time seconds of cinematic slow motion
   fightT: number; // remaining life of the "FIGHT!" flash after countdown
   numPlayers: number;
-  /** How many of the fighters are locally controlled humans (1-4): P1 uses
-   *  mouse + arrows, P2 the ASDW keys, P3 the IJKL ("JLKI") keys, P4 a
-   *  connected gamepad (e.g. a PS5 controller). Any remainder are CPUs. */
+  /** How many of the fighters are locally controlled humans (1-4). Each
+   *  human's input device is picked independently via `controlSchemes` (e.g.
+   *  two gamepads + one keyboard player), rather than being tied to a fixed
+   *  P1/P2/P3/P4 order. Any remainder beyond `numHumans` are CPUs. */
   numHumans: number;
+  /** Per-slot input device for each local human (index = slot in
+   *  `game.players`, i.e. the first `numHumans` fighters). Values: 0 = mouse +
+   *  arrow keys, 1 = WASD keys, 2 = IJKL keys, 3-6 = gamepad 1-4. Lets any
+   *  combination of keyboards/gamepads be assigned to any player slot. */
+  controlSchemes: number[];
   difficulty: number;
   target: number;
   arenaSel: number; // -1 = random each round, else fixed ARENAS index
@@ -173,6 +179,7 @@ export const game: GameState = {
   fightT: 0,
   numPlayers: 4,
   numHumans: 1,
+  controlSchemes: [0, 1, 2, 3],
   difficulty: 1,
   target: 5,
   arenaSel: -1,
@@ -194,6 +201,33 @@ export const game: GameState = {
   roundNum: 0,
 };
 
+/* --------------------------- control schemes ------------------------------ */
+
+export const MAX_HUMANS = 4;
+/** 0 = mouse + arrows, 1 = WASD, 2 = IJKL, 3-6 = gamepad 1-4. */
+export const MAX_CONTROL_SCHEME = 6;
+
+/** Ensure `controlSchemes` is the right length and that every active human
+ *  slot (0..numHumans-1) has a distinct, in-range device — repairing any
+ *  duplicates/gaps left by a stale save or a changed player count. */
+export function sanitizeControlSchemes(): void {
+  const cs = game.controlSchemes;
+  for (let i = 0; i < MAX_HUMANS; i++) {
+    const v = cs[i];
+    if (!Number.isFinite(v) || v < 0 || v > MAX_CONTROL_SCHEME) cs[i] = i;
+  }
+  cs.length = MAX_HUMANS;
+  const used = new Set<number>();
+  for (let i = 0; i < game.numHumans; i++) {
+    if (used.has(cs[i])) {
+      let next = 0;
+      while (used.has(next) && next <= MAX_CONTROL_SCHEME) next++;
+      cs[i] = next;
+    }
+    used.add(cs[i]);
+  }
+}
+
 /* ----------------------- settings persistence ----------------------------- */
 
 const SAVE_KEY = 'boomerang-buffet-settings-v1';
@@ -202,8 +236,9 @@ const SAVED_FIELDS = ['numPlayers', 'numHumans', 'difficulty', 'target', 'arenaS
 /** Persist the menu selections so a returning player keeps their setup. */
 export function saveSettings(): void {
   try {
-    const out: Record<string, number> = {};
+    const out: Record<string, number | number[]> = {};
     for (const k of SAVED_FIELDS) out[k] = game[k];
+    out.controlSchemes = game.controlSchemes;
     localStorage.setItem(SAVE_KEY, JSON.stringify(out));
   } catch {
     /* storage unavailable (private mode etc.) — settings just won't stick */
@@ -220,6 +255,9 @@ export function loadSettings(): void {
       const v = data[k];
       if (typeof v === 'number' && Number.isFinite(v)) game[k] = v;
     }
+    if (Array.isArray(data.controlSchemes)) {
+      game.controlSchemes = data.controlSchemes.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    }
     // clamp into legal ranges in case the save predates a balance change
     game.numPlayers = Math.min(6, Math.max(2, Math.round(game.numPlayers)));
     game.numHumans = Math.min(4, game.numPlayers, Math.max(1, Math.round(game.numHumans)));
@@ -227,6 +265,7 @@ export function loadSettings(): void {
     game.target = Math.min(9, Math.max(1, Math.round(game.target)));
     game.mode = Math.min(3, Math.max(0, Math.round(game.mode)));
     game.fallProtect = Math.min(2, Math.max(0, Math.round(game.fallProtect)));
+    sanitizeControlSchemes();
   } catch {
     /* corrupted save — ignore */
   }

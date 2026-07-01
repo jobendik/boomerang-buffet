@@ -75,12 +75,11 @@ function updateGolden(dt: number): void {
 
 /** Per-frame simulation step and human input translation. */
 
-/** P1: mouse aim/throw + arrow keys (also WASD, when solo — freed up for P2's
- *  ASDW scheme once local multiplayer is active). */
-function mouseIntents(p: Player): Intents {
+/** Mouse aim/throw + arrow keys (also WASD, when this is the only local human
+ *  — freed up for another player's WASD scheme once they join). */
+function mouseIntents(p: Player, soloWASD: boolean): Intents {
   let mx = 0;
   let my = 0;
-  const soloWASD = game.numHumans <= 1; // WASD only doubles as P1's move keys in single-human play
   if (keys['ArrowUp'] || (soloWASD && keys['KeyW'])) my -= 1;
   if (keys['ArrowDown'] || (soloWASD && keys['KeyS'])) my += 1;
   if (keys['ArrowLeft'] || (soloWASD && keys['KeyA'])) mx -= 1;
@@ -108,11 +107,11 @@ interface KeyScheme {
   jump: string;
 }
 
-/** P2: the WASD keys — the classic move set, freed from P1 once a second
- *  local human joins — plus a Z/X/C/V action cluster. */
+/** The WASD keys — the classic move set, freed for the mouse player once
+ *  another local human joins — plus a Z/X/C/V action cluster. */
 const WASD_SCHEME: KeyScheme = { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'KeyZ', slash: 'KeyX', dash: 'KeyC', throwKey: 'KeyV' };
 
-/** P3: the IJKL keys — same diamond shape as WASD, shifted onto the right
+/** The IJKL keys — same diamond shape as WASD, shifted onto the right
  *  hand — plus a U/O/N/comma action cluster. */
 const IJKL_SCHEME: KeyScheme = { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', jump: 'KeyN', slash: 'KeyO', dash: 'KeyU', throwKey: 'Comma' };
 
@@ -137,10 +136,11 @@ function keyboardIntents(p: Player, s: KeyScheme): Intents {
   };
 }
 
-/** P4 (and beyond): a connected gamepad — left stick to move, right stick to
- *  aim (falling back to facing the move direction if the pad has no right
- *  stick pushed), face buttons for throw/slash/dash/jump. Works with any
- *  standard-mapping controller, including the PS5 DualSense. */
+/** A connected gamepad, by its connection-order index — left stick to move,
+ *  right stick to aim (falling back to facing the move direction if the pad
+ *  has no right stick pushed), face buttons for throw/slash/dash/jump. Works
+ *  with any standard-mapping controller, including the PS5 DualSense — any
+ *  number of local players can each be assigned their own pad. */
 function gamepadIntents(p: Player, padIndex: number): Intents {
   const pad = readGamepad(padIndex);
   if (!pad) return { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
@@ -158,18 +158,22 @@ function gamepadIntents(p: Player, padIndex: number): Intents {
 }
 
 /** Dispatch a local player's slot (its index within `game.players`, since
- *  humans always occupy the first `numHumans` slots) to its control scheme:
- *  0 = mouse+keys, 1 = ASDW, 2 = JLKI, 3+ = gamepad. */
+ *  humans always occupy the first `numHumans` slots) to its assigned control
+ *  scheme (`game.controlSchemes[slot]`, set independently per slot from the
+ *  setup menu): 0 = mouse+keys, 1 = WASD, 2 = IJKL, 3+ = gamepad (index
+ *  scheme-3). This lets any mix of keyboards and gamepads be assigned to any
+ *  player slot, e.g. two gamepads plus one keyboard player. */
 function humanIntents(p: Player, slot: number): Intents {
-  switch (slot) {
+  const scheme = game.controlSchemes[slot] ?? slot;
+  switch (scheme) {
     case 0:
-      return mouseIntents(p);
+      return mouseIntents(p, game.numHumans <= 1);
     case 1:
       return keyboardIntents(p, WASD_SCHEME);
     case 2:
       return keyboardIntents(p, IJKL_SCHEME);
     default:
-      return gamepadIntents(p, slot - 3);
+      return gamepadIntents(p, scheme - 3);
   }
 }
 
