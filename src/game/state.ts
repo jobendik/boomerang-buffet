@@ -221,8 +221,8 @@ export function sanitizeControlSchemes(): void {
   for (let i = 0; i < game.numHumans; i++) {
     if (used.has(cs[i])) {
       let next = 0;
-      while (used.has(next) && next <= MAX_CONTROL_SCHEME) next++;
-      cs[i] = next;
+      while (used.has(next) && next < MAX_CONTROL_SCHEME) next++;
+      cs[i] = next; // guaranteed in [0, MAX_CONTROL_SCHEME]: fewer humans than devices
     }
     used.add(cs[i]);
   }
@@ -256,7 +256,10 @@ export function loadSettings(): void {
       if (typeof v === 'number' && Number.isFinite(v)) game[k] = v;
     }
     if (Array.isArray(data.controlSchemes)) {
-      game.controlSchemes = data.controlSchemes.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+      game.controlSchemes = data.controlSchemes
+        .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+        .map((v) => Math.min(MAX_CONTROL_SCHEME, Math.max(0, Math.round(v))))
+        .slice(0, MAX_HUMANS);
     }
     // clamp into legal ranges in case the save predates a balance change
     game.numPlayers = Math.min(6, Math.max(2, Math.round(game.numPlayers)));

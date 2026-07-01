@@ -329,7 +329,8 @@ function controlChips(x: number, y: number, w: number, h: number, count: number)
     ctx.font = fontB(9.5, 800);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const scheme = game.controlSchemes[i] ?? i;
+    // controlSchemes is sanitized (length MAX_HUMANS, in-range) at the top of drawSetup()
+    const scheme = game.controlSchemes[i];
     ctx.fillText(`P${i + 1} · ${DEVICE_SHORT[scheme] ?? '?'}`, cx + cw / 2, y + h / 2 + 1);
     hits.push({ x: cx, y, w: cw, h, act: `ctrl:${i}` });
   }
