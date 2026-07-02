@@ -141,12 +141,32 @@ export interface PadIntents {
   jump: boolean;
 }
 
-/** Poll the gamepad at `padIndex` (order they connected in). Returns null if
- *  nothing is plugged in at that slot. */
+/** Poll the `padIndex`-th *currently connected* gamepad (0 = "Gamepad 1", 1 =
+ *  "Gamepad 2", ...). Returns null if fewer than `padIndex + 1` pads are
+ *  plugged in.
+ *
+ *  Deliberately does *not* index `navigator.getGamepads()` directly by
+ *  `padIndex`: the browser assigns each pad a fixed array slot on connect
+ *  and leaves gaps when pads disconnect (or reconnect into a different
+ *  slot), so with two identical controllers it's common to end up with pads
+ *  sitting at, say, indices 0 and 2 rather than 0 and 1. Indexing the array
+ *  directly would then silently drop the second controller ("Gamepad 2")
+ *  even though it's connected. Instead we compact the connected pads in
+ *  array order and pick the Nth one, so "Gamepad 1"/"Gamepad 2" always mean
+ *  the first/second controller actually plugged in. */
 export function readGamepad(padIndex: number): PadIntents | null {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  const pad = pads[padIndex];
-  if (!pad || !pad.connected) return null;
+  let seen = -1;
+  let pad: Gamepad | null = null;
+  for (const p of pads) {
+    if (!p || !p.connected) continue;
+    seen++;
+    if (seen === padIndex) {
+      pad = p;
+      break;
+    }
+  }
+  if (!pad) return null;
   const mx = axis(pad.axes[0] ?? 0);
   const my = axis(pad.axes[1] ?? 0);
   const rx = axis(pad.axes[2] ?? 0);
