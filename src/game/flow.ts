@@ -13,16 +13,25 @@ import { game } from './state';
 
 function buildPlayers(): void {
   game.players = [];
-  // shuffle the roster + spawn order; the human's picked fighter (if any)
-  // is pulled to the front so player 0 always gets it
+  // shuffle the roster, then pull each human's explicitly picked fighter (if
+  // any) out of the pool so it isn't handed to someone else too
   const idxs = CHARS.map((_, i) => i).sort(() => Math.random() - 0.5);
-  if (game.charSel >= 0 && game.charSel < CHARS.length) {
-    idxs.splice(idxs.indexOf(game.charSel), 1);
-    idxs.unshift(game.charSel);
+  const picks: (number | null)[] = [];
+  for (let i = 0; i < game.numPlayers; i++) {
+    const pick = i < game.numHumans ? game.charSel[i] : -1;
+    if (pick >= 0 && pick < CHARS.length && idxs.includes(pick)) {
+      idxs.splice(idxs.indexOf(pick), 1);
+      picks.push(pick);
+    } else {
+      picks.push(null);
+    }
   }
+  // idxs always has enough elements here: CHARS.length (12) >= numPlayers (max 6),
+  // and each entry in `picks` that consumed an idx was already spliced out above.
+  const charOrder = picks.map((pick) => (pick !== null ? pick : idxs.shift()!));
   const spawnsOrder = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
   for (let i = 0; i < game.numPlayers; i++) {
-    const p = new Player(idxs[i], spawnsOrder[i], i >= game.numHumans);
+    const p = new Player(charOrder[i], spawnsOrder[i], i >= game.numHumans);
     // Team Up: split the lobby into two squads (you always lead team 0)
     p.team = game.mode === 1 ? i % 2 : -1;
     game.players.push(p);

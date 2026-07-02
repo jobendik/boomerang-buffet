@@ -9,7 +9,7 @@ import { POWERS, POWER_KEYS, type PowerKey } from '../data/powers';
 import { drawBoomShape, roundRectPath } from '../gfx/shapes';
 import { drawCrown, drawPowerIcon } from '../gfx/icons';
 import { button, fontB, fontD, keycap, panel, pill, titleText, UI } from './widgets';
-import { game, saveSettings } from '../game/state';
+import { game, saveSettings, sanitizeCharSel, sanitizeControlSchemes } from '../game/state';
 import { startMatch } from '../game/flow';
 import { computeAwards } from '../game/awards';
 import { drawArena } from './arena';
@@ -28,6 +28,23 @@ const MODE_DESC = [
 ];
 const DIFF_NAMES = ['Chill', 'Normal', 'Spicy'];
 const FALL_NAMES = ['Off', 'Gentle', 'Extreme'];
+/** Control-scheme picker labels, matching `game.controlSchemes` indices. */
+const SCHEME_NAMES = ['Mouse + Arrows', 'WASD keys', 'IJKL keys', 'Gamepad 1', 'Gamepad 2', 'Gamepad 3', 'Gamepad 4'];
+
+/** Which human slot's fighter/controls the left setup panel is currently editing. */
+let charTab = 0;
+
+/** Assign `scheme` to human slot `tab`, swapping with whoever else already
+ *  has it so every active slot keeps a distinct input device. Only called
+ *  with `scheme` one step away from the current value (see the stepper
+ *  click handler), so a single modulo is enough to wrap it into range. */
+function setControlScheme(tab: number, scheme: number): void {
+  const n = SCHEME_NAMES.length;
+  const wrapped = ((scheme % n) + n) % n;
+  const clash = game.controlSchemes.findIndex((s, i) => i < game.numHumans && i !== tab && s === wrapped);
+  if (clash >= 0) game.controlSchemes[clash] = game.controlSchemes[tab];
+  game.controlSchemes[tab] = wrapped;
+}
 
 interface Hit {
   x: number;
@@ -313,7 +330,10 @@ function stepper(x: number, y: number, w: number, label: string, value: string, 
 function drawSetup(): void {
   // sanitize persisted selections against the live data tables
   game.arenaSel = clamp(game.arenaSel, -1, ARENAS.length - 1);
-  game.charSel = clamp(game.charSel, -1, CHARS.length - 1);
+  sanitizeCharSel(CHARS.length - 1);
+  sanitizeControlSchemes();
+  if (charTab >= game.numHumans) charTab = game.numHumans - 1;
+  if (charTab < 0) charTab = 0;
 
   ctx.fillStyle = 'rgba(10,6,18,.72)';
   ctx.fillRect(0, 0, W, H);
@@ -325,19 +345,46 @@ function drawSetup(): void {
   ctx.font = fontB(13, 900);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('YOUR FIGHTER', 56, 112);
+  ctx.fillText(game.numHumans > 1 ? `P${charTab + 1} FIGHTER` : 'YOUR FIGHTER', 56, 112);
+
+  // player tabs — pick which human's avatar/controls this panel is editing
+  if (game.numHumans > 1) {
+    const tabW = 44;
+    const tabH = 20;
+    const tabGap = 6;
+    const tabsRight = 36 + 404 - 20;
+    const tabsX = tabsRight - (tabW * game.numHumans + tabGap * (game.numHumans - 1));
+    const tabsY = 96;
+    for (let i = 0; i < game.numHumans; i++) {
+      const tx = tabsX + i * (tabW + tabGap);
+      const active = i === charTab;
+      const hov = hot(tx, tabsY, tabW, tabH);
+      ctx.fillStyle = active ? UI.gold : hov ? 'rgba(255,255,255,.24)' : 'rgba(255,255,255,.1)';
+      roundRectPath(tx, tabsY, tabW, tabH, 8);
+      ctx.fill();
+      ctx.fillStyle = active ? UI.ink : UI.cream;
+      ctx.font = fontB(11, 900);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`P${i + 1}`, tx + tabW / 2, tabsY + tabH / 2 + 1);
+      hits.push({ x: tx, y: tabsY, w: tabW, h: tabH, act: 'chartab:' + i });
+    }
+    ctx.textBaseline = 'alphabetic';
+  }
 
   const tw = 88;
   const th = 84;
   const gx = 36 + 18;
   const gy = 124;
+  const otherPicks = game.charSel.slice(0, game.numHumans).filter((_, i) => i !== charTab);
   for (let i = -1; i < CHARS.length; i++) {
     const slot = i + 1;
     const col = slot % 4;
     const row = Math.floor(slot / 4);
     const x = gx + col * (tw + 6);
     const y = gy + row * (th + 6);
-    const sel = game.charSel === i;
+    const sel = game.charSel[charTab] === i;
+    const takenByOther = i >= 0 && otherPicks.includes(i);
     const hov = hot(x, y, tw, th);
     ctx.fillStyle = sel ? 'rgba(255,206,84,.18)' : hov ? 'rgba(255,255,255,.14)' : 'rgba(255,255,255,.06)';
     roundRectPath(x, y, tw, th, 12);
@@ -348,6 +395,8 @@ function drawSetup(): void {
       roundRectPath(x + 1, y + 1, tw - 2, th - 2, 11);
       ctx.stroke();
     }
+    ctx.save();
+    if (takenByOther) ctx.globalAlpha = 0.35;
     if (i === -1) {
       // RANDOM tile: a die face
       ctx.save();
@@ -371,12 +420,18 @@ function drawSetup(): void {
       c.draw(c, 19, looking ? [0, 0.3] : [Math.sin(game.time + i), 0.1]);
       ctx.restore();
     }
+    ctx.restore();
     ctx.fillStyle = sel ? UI.gold : 'rgba(255,243,223,.7)';
     ctx.font = fontB(11, 800);
     ctx.textAlign = 'center';
     ctx.fillText(i === -1 ? 'Random' : CHARS[i].name, x + tw / 2, y + th - 8);
     hits.push({ x, y, w: tw, h: th, act: 'char:' + i });
   }
+
+  // control-device picker for the tabbed player — freely assignable so any
+  // mix of keyboard schemes and gamepads can be used together
+  const ctrlY = gy + 4 * (th + 6) + 10;
+  stepper(56, ctrlY, 384, 'CONTROLS', SCHEME_NAMES[game.controlSchemes[charTab]], 'scheme' + charTab);
 
   /* ---- right: match options ---- */
   panel(456, 84, 532, 466);
@@ -417,7 +472,7 @@ function drawSetup(): void {
   ctx.fillStyle = 'rgba(255,243,223,.45)';
   ctx.font = fontB(10, 700);
   ctx.textAlign = 'left';
-  ctx.fillText(['mouse + arrows', '+ WASD keys', '+ IJKL keys', '+ gamepad'][Math.min(3, game.numHumans - 1)], sx, 398);
+  ctx.fillText(`each with its own device — pick under FIGHTER (left)`, sx, 398);
 
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(12, 900);
@@ -486,17 +541,17 @@ function drawHelp(): void {
     ctx.fillText(label, 148, y + 11);
   });
 
-  // Up to 4 players locally: P1 above (mouse), P2-P4 below (no mouse needed —
-  // they face the way they last moved).
+  // Up to 4 local players; each picks their own device in Setup → FIGHTER
+  // (mouse+arrows, WASD, IJKL, or any connected gamepad, in any combination).
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(11, 900);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('LOCAL MULTIPLAYER (SETUP → LOCAL PLAYERS)', 56, 372);
+  ctx.fillText('LOCAL MULTIPLAYER (SETUP → FIGHTER, per player)', 56, 372);
   const localPlayers: [string, string][] = [
-    ['P2 · WASD', 'move · V throw · X slash · C dash · Z jump'],
-    ['P3 · IJKL', 'move · , throw · O slash · U dash · N jump'],
-    ['P4 · gamepad', 'e.g. PS5 controller — sticks move/aim, face buttons act'],
+    ['WASD', 'move · V throw · X slash · C dash · Z jump'],
+    ['IJKL', 'move · , throw · O slash · U dash · N jump'],
+    ['Gamepad', 'e.g. PS5 controller — sticks move/aim, face buttons act'],
   ];
   localPlayers.forEach(([k, label], i) => {
     const y = 384 + i * 15;
@@ -599,6 +654,15 @@ export function handleMenuClick(): void {
   for (const b of hits) {
     if (!pointIn(mouse.x, mouse.y, b.x, b.y, b.w, b.h)) continue;
     audio.tick();
+    // per-tab control-scheme stepper hits look like 'scheme0-' / 'scheme0+'
+    const schemeMatch = /^scheme(\d)([-+])$/.exec(b.act);
+    if (schemeMatch) {
+      const tab = parseInt(schemeMatch[1], 10);
+      const dir = schemeMatch[2] === '+' ? 1 : -1;
+      setControlScheme(tab, game.controlSchemes[tab] + dir);
+      saveSettings();
+      return;
+    }
     const [act, arg] = b.act.split(':');
     switch (act) {
       case 'play':
@@ -618,7 +682,10 @@ export function handleMenuClick(): void {
         audio.toggleMute();
         break;
       case 'char':
-        game.charSel = parseInt(arg, 10);
+        game.charSel[charTab] = parseInt(arg, 10);
+        break;
+      case 'chartab':
+        charTab = clamp(parseInt(arg, 10), 0, game.numHumans - 1);
         break;
       case 'mode':
         game.mode = clamp(parseInt(arg, 10), 0, MODE_NAMES.length - 1);
