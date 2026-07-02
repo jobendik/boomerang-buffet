@@ -35,9 +35,12 @@ const SCHEME_NAMES = ['Mouse + Arrows', 'WASD keys', 'IJKL keys', 'Gamepad 1', '
 let charTab = 0;
 
 /** Assign `scheme` to human slot `tab`, swapping with whoever else already
- *  has it so every active slot keeps a distinct input device. */
+ *  has it so every active slot keeps a distinct input device. Only called
+ *  with `scheme` one step away from the current value (see the stepper
+ *  click handler), so a single modulo is enough to wrap it into range. */
 function setControlScheme(tab: number, scheme: number): void {
-  const wrapped = ((scheme % SCHEME_NAMES.length) + SCHEME_NAMES.length) % SCHEME_NAMES.length;
+  const n = SCHEME_NAMES.length;
+  const wrapped = ((scheme % n) + n) % n;
   const clash = game.controlSchemes.findIndex((s, i) => i < game.numHumans && i !== tab && s === wrapped);
   if (clash >= 0) game.controlSchemes[clash] = game.controlSchemes[tab];
   game.controlSchemes[tab] = wrapped;
@@ -654,7 +657,6 @@ export function handleMenuClick(): void {
     // per-tab control-scheme stepper hits look like 'scheme0-' / 'scheme0+'
     const schemeMatch = /^scheme(\d)([-+])$/.exec(b.act);
     if (schemeMatch) {
-      audio.tick();
       const tab = parseInt(schemeMatch[1], 10);
       const dir = schemeMatch[2] === '+' ? 1 : -1;
       setControlScheme(tab, game.controlSchemes[tab] + dir);

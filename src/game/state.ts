@@ -6,6 +6,7 @@ import type { FirePatch } from '../entities/FirePatch';
 import type { IcePatch } from '../entities/IcePatch';
 import type { Crusher } from '../entities/Crusher';
 import type { PowerKey } from '../data/powers';
+import { CHARS } from '../data/characters';
 import type { Vec2 } from '../types';
 
 /**
@@ -228,7 +229,7 @@ export function sanitizeControlSchemes(): void {
   for (let i = 0; i < game.numHumans; i++) {
     if (used.has(schemes[i])) {
       let next = 0;
-      while (used.has(next)) next++;
+      while (used.has(next) && next < NUM_CONTROL_SCHEMES) next++;
       schemes[i] = next;
     }
     used.add(schemes[i]);
@@ -285,6 +286,7 @@ export function loadSettings(): void {
     game.mode = Math.min(3, Math.max(0, Math.round(game.mode)));
     game.fallProtect = Math.min(2, Math.max(0, Math.round(game.fallProtect)));
     sanitizeControlSchemes();
+    sanitizeCharSel(CHARS.length - 1);
   } catch {
     /* corrupted save — ignore */
   }

@@ -26,6 +26,8 @@ function buildPlayers(): void {
       picks.push(null);
     }
   }
+  // idxs always has enough elements here: CHARS.length (12) >= numPlayers (max 6),
+  // and each entry in `picks` that consumed an idx was already spliced out above.
   const charOrder = picks.map((pick) => (pick !== null ? pick : idxs.shift()!));
   const spawnsOrder = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
   for (let i = 0; i < game.numPlayers; i++) {
