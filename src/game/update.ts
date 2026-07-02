@@ -75,16 +75,25 @@ function updateGolden(dt: number): void {
 
 /** Per-frame simulation step and human input translation. */
 
-/** P1: mouse aim/throw + arrow keys (also WASD, when solo — freed up for P2's
- *  ASDW scheme once local multiplayer is active). */
+/** Control scheme ids, as configured per human slot in `game.controlSchemes`. */
+const SCHEME_MOUSE = 0;
+const SCHEME_WASD = 1;
+const SCHEME_IJKL = 2;
+const SCHEME_GAMEPAD_BASE = 3; // 3..6 = Gamepad 1..4
+
+/** Mouse aim/throw + arrow keys. Freely assignable to any human slot via the
+ *  setup menu's control-scheme picker. */
 function mouseIntents(p: Player): Intents {
   let mx = 0;
   let my = 0;
-  const soloWASD = game.numHumans <= 1; // WASD only doubles as P1's move keys in single-human play
-  if (keys['ArrowUp'] || (soloWASD && keys['KeyW'])) my -= 1;
-  if (keys['ArrowDown'] || (soloWASD && keys['KeyS'])) my += 1;
-  if (keys['ArrowLeft'] || (soloWASD && keys['KeyA'])) mx -= 1;
-  if (keys['ArrowRight'] || (soloWASD && keys['KeyD'])) mx += 1;
+  // WASD only doubles as this player's move keys while nobody else is
+  // actually assigned the WASD scheme (keeps solo play convenient without
+  // stealing P2's keys once local multiplayer is using them).
+  const wasdFree = !game.controlSchemes.slice(0, game.numHumans).includes(SCHEME_WASD);
+  if (keys['ArrowUp'] || (wasdFree && keys['KeyW'])) my -= 1;
+  if (keys['ArrowDown'] || (wasdFree && keys['KeyS'])) my += 1;
+  if (keys['ArrowLeft'] || (wasdFree && keys['KeyA'])) mx -= 1;
+  if (keys['ArrowRight'] || (wasdFree && keys['KeyD'])) mx += 1;
   const aim = norm(mouse.x - p.x, mouse.y - p.y);
   return {
     move: [mx, my],
@@ -108,12 +117,11 @@ interface KeyScheme {
   jump: string;
 }
 
-/** P2: the WASD keys — the classic move set, freed from P1 once a second
- *  local human joins — plus a Z/X/C/V action cluster. */
+/** The WASD keys — the classic move set — plus a Z/X/C/V action cluster. */
 const WASD_SCHEME: KeyScheme = { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'KeyZ', slash: 'KeyX', dash: 'KeyC', throwKey: 'KeyV' };
 
-/** P3: the IJKL keys — same diamond shape as WASD, shifted onto the right
- *  hand — plus a U/O/N/comma action cluster. */
+/** The IJKL keys — same diamond shape as WASD, shifted onto the right hand —
+ *  plus a U/O/N/comma action cluster. */
 const IJKL_SCHEME: KeyScheme = { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', jump: 'KeyN', slash: 'KeyO', dash: 'KeyU', throwKey: 'Comma' };
 
 /** No mouse for these local players — aim follows the last move direction
@@ -137,10 +145,10 @@ function keyboardIntents(p: Player, s: KeyScheme): Intents {
   };
 }
 
-/** P4 (and beyond): a connected gamepad — left stick to move, right stick to
- *  aim (falling back to facing the move direction if the pad has no right
- *  stick pushed), face buttons for throw/slash/dash/jump. Works with any
- *  standard-mapping controller, including the PS5 DualSense. */
+/** A connected gamepad — left stick to move, right stick to aim (falling
+ *  back to facing the move direction if the pad has no right stick pushed),
+ *  face buttons for throw/slash/dash/jump. Works with any standard-mapping
+ *  controller, including the PS5 DualSense. */
 function gamepadIntents(p: Player, padIndex: number): Intents {
   const pad = readGamepad(padIndex);
   if (!pad) return { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
@@ -158,18 +166,20 @@ function gamepadIntents(p: Player, padIndex: number): Intents {
 }
 
 /** Dispatch a local player's slot (its index within `game.players`, since
- *  humans always occupy the first `numHumans` slots) to its control scheme:
- *  0 = mouse+keys, 1 = ASDW, 2 = JLKI, 3+ = gamepad. */
+ *  humans always occupy the first `numHumans` slots) to whichever control
+ *  scheme it's been assigned in `game.controlSchemes` — freely configurable
+ *  per slot in the setup menu, independent of slot order. */
 function humanIntents(p: Player, slot: number): Intents {
-  switch (slot) {
-    case 0:
+  const scheme = game.controlSchemes[slot] ?? slot;
+  switch (scheme) {
+    case SCHEME_MOUSE:
       return mouseIntents(p);
-    case 1:
+    case SCHEME_WASD:
       return keyboardIntents(p, WASD_SCHEME);
-    case 2:
+    case SCHEME_IJKL:
       return keyboardIntents(p, IJKL_SCHEME);
     default:
-      return gamepadIntents(p, slot - 3);
+      return gamepadIntents(p, scheme - SCHEME_GAMEPAD_BASE);
   }
 }
 
