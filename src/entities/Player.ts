@@ -120,6 +120,7 @@ export class Player {
   ghostT!: number; // dash afterimage cadence
   streak!: number; // kills chained inside the streak window
   streakT!: number; // remaining streak window
+  swingDir!: number; // which way the next melee swing sweeps (alternates)
   squashT!: number; // landing/dash squash timer (visual)
   disguised!: boolean; // DISGUISE: held still long enough to look like scenery
   disguiseT!: number; // seconds of stillness accumulated toward disguising
@@ -216,6 +217,7 @@ export class Player {
     this.ghostT = 0;
     this.streak = 0;
     this.streakT = 0;
+    this.swingDir = 1;
     this.squashT = 0;
     this.disguised = false;
     this.disguiseT = 0;
@@ -500,6 +502,7 @@ export class Player {
       if (this.isSeeker) this.attemptsLeft--;
       this.slashT = SLASH_ACTIVE;
       this.slashCd = this.powers.has('EXTRA') ? SLASH_CD_FAST : SLASH_CD;
+      this.swingDir = -this.swingDir; // alternate forehand/backhand swings
       // STAB lunges the fighter forward on the swing — an aggressive gap-closer.
       if (this.powers.has('STAB')) {
         this.vx = this.aim[0] * 560;
@@ -878,9 +881,11 @@ export class Player {
     game.shake = Math.max(game.shake, 14);
     game.hitstop = Math.max(game.hitstop, 0.09);
 
-    // cinematic beats: a brief slow-mo when a kill decides the round, or when
-    // the Golden Boomerang carrier scores one (the blueprint's time-dilation)
+    // cinematic beats: EVERY slice gets a micro slow-mo so the two halves are
+    // seen tumbling apart; a round-deciding kill or a Golden-carrier kill
+    // stretches the moment further (the blueprint's time-dilation)
     if (game.state === 'playing') {
+      game.slowmo = Math.max(game.slowmo, 0.28);
       const left = game.players.filter((q) => q.alive).length;
       if (left === 1 && game.players.length > 1) game.slowmo = Math.max(game.slowmo, 0.75);
       if (killer && killer.isGoldCarrier) game.slowmo = Math.max(game.slowmo, 0.6);
@@ -975,19 +980,32 @@ export class Player {
 
     this.char.draw(this.char, this.r, this.aim);
 
-    // slash arc swoosh
+    // melee swing: the boomerang itself sweeps across the slash arc like a
+    // knife — wind-up edge to follow-through — trailing a fading swoosh
     if (this.slashT > 0) {
       const a = Math.atan2(this.aim[1], this.aim[0]);
-      const k = this.slashT / SLASH_ACTIVE;
-      ctx.strokeStyle = `rgba(255,255,255,${0.85 * k})`;
-      ctx.lineWidth = 5;
+      const k = 1 - this.slashT / SLASH_ACTIVE; // 0 wind-up → 1 follow-through
+      const fade = this.slashT / SLASH_ACTIVE;
+      const sweep = SLASH_HALF * 1.5;
+      const start = a - this.swingDir * sweep;
+      const blade = start + this.swingDir * sweep * 2 * k; // blade's current angle
+      const rad = this.r + SLASH_RANGE * 0.7;
+      ctx.save();
       ctx.lineCap = 'round';
+      // the swoosh swept out so far, brightest along the blade's wake
+      ctx.strokeStyle = `rgba(255,255,255,${0.8 * fade})`;
+      ctx.lineWidth = 6;
       ctx.beginPath();
-      ctx.arc(0, 0, this.r + SLASH_RANGE * 0.7, a - SLASH_HALF, a + SLASH_HALF);
+      ctx.arc(0, 0, rad, start, blade, this.swingDir < 0);
       ctx.stroke();
-      ctx.strokeStyle = `rgba(180,240,255,${0.5 * k})`;
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = `rgba(180,240,255,${0.45 * fade})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, rad + 4, start, blade, this.swingDir < 0);
       ctx.stroke();
+      // the blade: our own boomerang, spinning hard as it's swung through
+      drawBoomShape(Math.cos(blade) * rad, Math.sin(blade) * rad, 10, blade + k * 9, this.char.dark);
+      ctx.restore();
     }
     // burning glow (the fiery particles themselves come from update())
     if (this.burning > 0) {
@@ -1041,12 +1059,14 @@ export class Player {
     }
     ctx.restore();
 
-    // boomerang-in-hand indicators + charge arc (ride up with the hop)
+    // boomerang-in-hand indicators + charge arc (ride up with the hop).
+    // While slashing, one boomerang is busy being swung — don't double-draw it.
     if (this.boomsInHand > 0) {
       const hbY = this.y + bobY - this.jumpZ;
       const a = Math.atan2(this.aim[1], this.aim[0]);
-      for (let i = 0; i < this.boomsInHand; i++) {
-        const off = (i - (this.boomsInHand - 1) / 2) * 0.5;
+      const shown = this.slashT > 0 ? this.boomsInHand - 1 : this.boomsInHand;
+      for (let i = 0; i < shown; i++) {
+        const off = (i - (shown - 1) / 2) * 0.5;
         const hx = this.x + Math.cos(a + off) * (this.r + 9);
         const hy = hbY + Math.sin(a + off) * (this.r + 9);
         drawBoomShape(hx, hy, 7, game.time * 6, this.char.dark);

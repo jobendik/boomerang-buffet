@@ -113,21 +113,29 @@ function mouseIntents(p: Player): Intents {
  * it keeps keyboard/gamepad throws competitive without ever aiming for you.
  */
 function assistAim(p: Player, aim: Vec2): Vec2 {
-  let best: Player | null = null;
+  let best: Vec2 | null = null;
   let bestDot = 0.92; // ≈ ±23° cone — outside it, your aim is your aim
-  for (const q of game.players) {
-    if (!q.alive || q.disguised || !p.isEnemy(q)) continue;
-    const d = dist(p.x, p.y, q.x, q.y);
-    if (d > 520 || d < 1) continue;
-    const dir = norm(q.x - p.x, q.y - p.y);
+  const consider = (x: number, y: number): void => {
+    const d = dist(p.x, p.y, x, y);
+    if (d > 520 || d < 1) return;
+    const dir = norm(x - p.x, y - p.y);
     const dot = dir[0] * aim[0] + dir[1] * aim[1];
     if (dot > bestDot) {
       bestDot = dot;
-      best = q;
+      best = [x, y];
     }
+  };
+  for (const q of game.players) {
+    if (q.alive && !q.disguised && p.isEnemy(q)) consider(q.x, q.y);
+  }
+  // enemy DECOY clones magnetize too — the assist must be as gullible as the
+  // eye, or assisted players would get free decoy-detection
+  for (const d of game.decoys) {
+    if (d.ownerIdx === p.idx || (p.team >= 0 && d.team >= 0 && p.team === d.team)) continue;
+    consider(d.x, d.y);
   }
   if (!best) return aim;
-  const dir = norm(best.x - p.x, best.y - p.y);
+  const dir = norm(best[0] - p.x, best[1] - p.y);
   return norm(lerp(aim[0], dir[0], 0.65), lerp(aim[1], dir[1], 0.65));
 }
 
