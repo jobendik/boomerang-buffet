@@ -39,6 +39,7 @@ export class Boomerang {
   blastScale: number; // explosion radius multiplier (<1 for MULTI sub-bombs)
   tk: boolean; // TELEKINESIS — steered by the owner's aim while they hold throw
   dead: boolean;
+  retT: number; // seconds spent homing back — the return speeds up over time
   fireT: number;
   bounceFlash: number;
   portalCd: number;
@@ -68,6 +69,7 @@ export class Boomerang {
     this.blastScale = 1;
     this.tk = false;
     this.dead = false;
+    this.retT = 0;
     this.fireT = 0;
     this.bounceFlash = 0;
     this.portalCd = 0;
@@ -135,10 +137,12 @@ export class Boomerang {
       }
     }
     if (this.phase === 'return' && owner.alive) {
-      // steer toward owner
+      // steer toward owner — an eager return that accelerates the longer it
+      // chases, so a whiffed throw costs seconds, not an eternity of downtime
+      this.retT += dt;
       const [dx, dy] = [owner.x - this.x, owner.y - this.y];
       const [nx, ny] = norm(dx, dy);
-      const sp = this.big ? 430 : 540;
+      const sp = (this.big ? 430 : 540) * (1 + Math.min(1, this.retT) * 0.35);
       const cur = Math.hypot(this.vx, this.vy) || sp;
       const tvx = nx * Math.max(cur, sp);
       const tvy = ny * Math.max(cur, sp);
@@ -227,9 +231,10 @@ export class Boomerang {
       }
     }
 
-    // catch by owner
+    // catch by owner (a slightly forgiving reach — snagging your own return
+    // should feel magnetic, not fiddly)
     if (this.phase === 'return' && owner.alive && !this.transient) {
-      if (dist(this.x, this.y, owner.x, owner.y) < owner.r + this.r) {
+      if (dist(this.x, this.y, owner.x, owner.y) < owner.r + this.r + 6) {
         owner.catchBoomerang();
         this.kill(false);
       }

@@ -78,7 +78,16 @@ the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
 - **Clash / parry** — a well-timed slash deflects an incoming boomerang straight
   back at its owner.
 - **Charged curve throws** — tap to throw straight; hold to bank the flight path
-  into an arc (max charge nearly orbits).
+  into an arc (max charge nearly orbits). The arc is *steerable*: strafe
+  sideways as you release and the boomerang banks toward the side you're
+  moving — the charging trajectory preview always shows the true path.
+- **Soft aim assist** — keyboard-only and gamepad fighters get a subtle
+  magnetism toward enemies within a narrow cone of their aim (mouse players
+  aim raw), keeping every input device competitive.
+- **Difficulty that means it** — bots have humanlike reaction times, aim
+  error, telegraphed melee windups and dodge latency, all tuned per tier:
+  *Chill* is genuinely beatable, *Spicy* earns its name — and never by
+  cheating with frame-perfect reads.
 - **Stackable power-ups** — modifiers accumulate and combine, persisting until
   death: `Fire` (sets foes alight — a contagious damage-over-time you can dash
   out of), `Ice` (mutually exclusive with Fire), `Bomb`, `Big`, `Multi` (splits

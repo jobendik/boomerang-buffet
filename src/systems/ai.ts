@@ -6,6 +6,70 @@ import type { Player } from '../entities/Player';
 
 /** CPU fighter behaviour: targeting, kiting, pickup-seeking and dodging. */
 
+/**
+ * Per-difficulty behaviour profile. Every human-frustrating edge the bots had
+ * (frame-perfect reactions, laser aim, machine-gun throws, instant melee) is
+ * governed here so "Chill" is genuinely beatable and "Spicy" earns its name.
+ */
+interface AITuning {
+  reactTime: [number, number]; // seconds between decision refreshes (target/aim)
+  aimJitter: number; // max radians of aim error, resampled each decision
+  lead: number; // velocity-lead factor when aiming at a mover (0 = none)
+  throwCd: [number, number]; // seconds between throw attempts
+  throwRange: number; // max distance at which a throw is attempted
+  chargeErr: number; // random error mixed into the throw charge
+  dodgeChance: number; // odds of reacting to an incoming boomerang at all
+  dodgeDelay: [number, number]; // reaction latency before the dodge move fires
+  parryChance: number; // odds of attempting a slash-parry on a close throw
+  meleeWindup: [number, number]; // telegraphed pause before a point-blank slash
+  jumpDodge: boolean; // whether the bot may hop over throws
+}
+
+const TUNING: AITuning[] = [
+  {
+    // Chill — sluggish reflexes, wobbly aim, generous openings
+    reactTime: [0.45, 0.7],
+    aimJitter: 0.28,
+    lead: 0,
+    throwCd: [1.5, 2.6],
+    throwRange: 400,
+    chargeErr: 0.3,
+    dodgeChance: 0.25,
+    dodgeDelay: [0.22, 0.42],
+    parryChance: 0.12,
+    meleeWindup: [0.3, 0.55],
+    jumpDodge: false,
+  },
+  {
+    // Normal — competent but human-ish: readable delays, occasional whiffs
+    reactTime: [0.25, 0.45],
+    aimJitter: 0.13,
+    lead: 0.07,
+    throwCd: [0.9, 1.7],
+    throwRange: 440,
+    chargeErr: 0.18,
+    dodgeChance: 0.5,
+    dodgeDelay: [0.1, 0.24],
+    parryChance: 0.3,
+    meleeWindup: [0.16, 0.32],
+    jumpDodge: true,
+  },
+  {
+    // Spicy — sharp but still fallible (never frame-perfect)
+    reactTime: [0.12, 0.22],
+    aimJitter: 0.055,
+    lead: 0.12,
+    throwCd: [0.55, 1.15],
+    throwRange: 480,
+    chargeErr: 0.1,
+    dodgeChance: 0.72,
+    dodgeDelay: [0.04, 0.12],
+    parryChance: 0.55,
+    meleeWindup: [0.06, 0.16],
+    jumpDodge: true,
+  },
+];
+
 function lineHitsObstacle(x1: number, y1: number, x2: number, y2: number): boolean {
   // coarse: sample
   const steps = 12;
@@ -24,26 +88,50 @@ function lineHitsObstacle(x1: number, y1: number, x2: number, y2: number): boole
   return false;
 }
 
+/** Can the bot legally see & fight this player right now? */
+function validTarget(p: Player, q: Player): boolean {
+  return q.alive && !q.disguised && !q.inBush && p.isEnemy(q);
+}
+
 export function aiThink(p: Player, dt: number): Intents {
   const a = p.ai;
+  const tune = TUNING[clamp(game.difficulty, 0, 2)];
   a.tThink -= dt;
   a.tThrow -= dt;
   a.tStrafe -= dt;
-  // pick target = nearest alive enemy.
+
+  // Decision tick: bots only reassess the battlefield every `reactTime`
+  // seconds — this is their reaction time. Between ticks they keep tracking
+  // their committed target (positions update) but won't notice a newly
+  // better one, and their aim error stays whatever was last sampled.
   // Bots are deliberately fooled by DISGUISE and lose line-of-sight on foes
   // lurking in bushes — both flaws faithfully kept from the source AI.
-  let best: Player | null = null;
-  let bd = Infinity;
-  for (const q of game.players) {
-    if (q.alive && !q.disguised && !q.inBush && p.isEnemy(q)) {
-      const d = dist2(p.x, p.y, q.x, q.y);
-      if (d < bd) {
-        bd = d;
-        best = q;
+  if (a.tThink <= 0) {
+    a.tThink = rand(tune.reactTime[0], tune.reactTime[1]);
+    a.aimErr = rand(-tune.aimJitter, tune.aimJitter);
+    let best: Player | null = null;
+    let bd = Infinity;
+    for (const q of game.players) {
+      if (validTarget(p, q)) {
+        const d = dist2(p.x, p.y, q.x, q.y);
+        if (d < bd) {
+          bd = d;
+          best = q;
+        }
       }
     }
+    // Target stickiness: commit to the current foe unless they're gone or a
+    // rival is CLEARLY closer. This spreads the bots' aggro around the lobby
+    // instead of the whole field frame-perfectly converging on one player.
+    const cur = a.target;
+    if (!cur || !validTarget(p, cur)) a.target = best;
+    else if (best && best !== cur && bd < dist2(p.x, p.y, cur.x, cur.y) * 0.5) a.target = best;
+  } else if (a.target && !validTarget(p, a.target)) {
+    a.target = null; // dead/hidden foes vanish immediately (no aiming at ghosts)
   }
-  a.target = best;
+
+  const best = a.target;
+  const bd = best ? dist2(p.x, p.y, best.x, best.y) : Infinity;
   const intents: Intents = {
     move: [0, 0],
     aimX: p.aim[0],
@@ -108,15 +196,18 @@ export function aiThink(p: Player, dt: number): Intents {
   } else if (best || phantom) {
     const d = tgDist;
     const [tx, ty] = norm(tgX - p.x, tgY - p.y);
-    // aim with lead (a decoy is stationary, so its lead terms are zero)
-    const lead = 0.12;
-    const ax = tgX + tgVx * lead;
-    const ay = tgY + tgVy * lead;
-    const aim = norm(ax - p.x, ay - p.y);
-    intents.aimX = aim[0];
-    intents.aimY = aim[1];
+    // aim with difficulty-scaled lead, then rotate by the sampled aim error —
+    // bots track their foe continuously but never with laser precision
+    // (a decoy is stationary, so its lead terms are zero)
+    const ax = tgX + tgVx * tune.lead;
+    const ay = tgY + tgVy * tune.lead;
+    const trueAim = norm(ax - p.x, ay - p.y);
+    const ce = Math.cos(a.aimErr);
+    const se = Math.sin(a.aimErr);
+    intents.aimX = trueAim[0] * ce - trueAim[1] * se;
+    intents.aimY = trueAim[0] * se + trueAim[1] * ce;
 
-    const idealDist = 240;
+    const idealDist = a.range;
     if (pick && Math.sqrt(pd) < 260 && p.powers.size < 3) {
       const [gx, gy] = norm(pick.x - p.x, pick.y - p.y);
       mvx = gx;
@@ -135,19 +226,30 @@ export function aiThink(p: Player, dt: number): Intents {
     }
 
     // point-blank melee slash (faster than a throw, so prefer it up close) —
-    // only against a real foe; a phantom isn't worth a swing.
+    // only against a real foe; a phantom isn't worth a swing. The swing is
+    // TELEGRAPHED: entering range arms a windup pause before the blade comes
+    // out, so an alert human can dash clear (no more frame-perfect stabs).
     if (best && !phantom && p.armed && p.slashCd <= 0 && d < p.r + best.r + 30) {
-      intents.slash = true;
+      if (a.meleeT < 0) a.meleeT = rand(tune.meleeWindup[0], tune.meleeWindup[1]);
+      else {
+        a.meleeT -= dt;
+        if (a.meleeT <= 0) {
+          intents.slash = true;
+          a.meleeT = -1;
+        }
+      }
+    } else {
+      a.meleeT = -1; // foe slipped out of range — the windup is wasted
     }
 
     // throw decision
-    if (p.hasBoomerang && a.tThrow <= 0 && d < 460 && !lineHitsObstacle(p.x, p.y, tgX, tgY)) {
+    if (p.hasBoomerang && a.tThrow <= 0 && d < tune.throwRange && !lineHitsObstacle(p.x, p.y, tgX, tgY)) {
       const facing = norm(intents.aimX, intents.aimY);
       const dot = facing[0] * tx + facing[1] * ty;
       if (dot > 0.6 || d < 200) {
         intents.throwNow = true;
-        intents.charge = clamp(d / 460 + rand(-0.1, 0.2), 0.2, 1);
-        a.tThrow = rand(0.55, 1.3);
+        intents.charge = clamp(d / tune.throwRange + rand(-tune.chargeErr, tune.chargeErr), 0.2, 1);
+        a.tThrow = rand(tune.throwCd[0], tune.throwCd[1]);
       }
     }
   } else {
@@ -178,37 +280,41 @@ export function aiThink(p: Player, dt: number): Intents {
     // Decide ONCE per incoming throw whether we react to it at all. Without this
     // reaction-miss roll, bots dash/jump-dodge every single boomerang — and since
     // a dodge grants invulnerability i-frames, they become untouchable and combat
-    // never resolves. The chance scales with difficulty so higher tiers feel sharper.
+    // never resolves. Even a committed dodge fires only after a human-like
+    // reaction delay, so a point-blank surprise throw still connects.
     if (danger !== a.dodgeBoom) {
       a.dodgeBoom = danger;
-      a.dodgeActive = Math.random() < 0.45 + game.difficulty * 0.2;
+      a.dodgeActive = Math.random() < tune.dodgeChance;
+      a.dodgeDelayT = rand(tune.dodgeDelay[0], tune.dodgeDelay[1]);
+      a.parryRoll = Math.random() < tune.parryChance;
     }
     if (a.dodgeActive) {
-      // slash to clash if close, armed & facing; else dash perpendicular
-      const facing = norm(intents.aimX, intents.aimY);
-      const toBoom = norm(danger.x - p.x, danger.y - p.y);
-      if (
-        ddist < 60 &&
-        p.armed &&
-        p.slashCd <= 0 &&
-        facing[0] * toBoom[0] + facing[1] * toBoom[1] > 0.2 &&
-        Math.random() < 0.5 + game.difficulty * 0.2
-      ) {
-        intents.slash = true;
-        intents.aimX = toBoom[0];
-        intents.aimY = toBoom[1];
-      } else if (p.dashCd <= 0 && ddist < 110) {
-        // dash perpendicular to incoming
-        const perp = [-dangerVec[1], dangerVec[0]];
-        const side = Math.random() < 0.5 ? 1 : -1;
-        mvx = perp[0] * side;
-        mvy = perp[1] * side;
-        intents.dash = true;
-      } else if (p.airCd <= 0 && p.airT <= 0 && ddist < 90) {
-        intents.jump = true; // dash on cooldown — hop the throw instead
+      a.dodgeDelayT -= dt;
+      if (a.dodgeDelayT > 0) {
+        // saw it — flinching away while the reaction winds up
+        mvx += dangerVec[0] * 0.6;
+        mvy += dangerVec[1] * 0.6;
       } else {
-        mvx += dangerVec[0];
-        mvy += dangerVec[1];
+        // slash to clash if close, armed & facing; else dash perpendicular
+        const facing = norm(intents.aimX, intents.aimY);
+        const toBoom = norm(danger.x - p.x, danger.y - p.y);
+        if (ddist < 60 && p.armed && p.slashCd <= 0 && facing[0] * toBoom[0] + facing[1] * toBoom[1] > 0.2 && a.parryRoll) {
+          intents.slash = true;
+          intents.aimX = toBoom[0];
+          intents.aimY = toBoom[1];
+        } else if (p.dashCd <= 0 && ddist < 110) {
+          // dash perpendicular to incoming
+          const perp = [-dangerVec[1], dangerVec[0]];
+          const side = Math.random() < 0.5 ? 1 : -1;
+          mvx = perp[0] * side;
+          mvy = perp[1] * side;
+          intents.dash = true;
+        } else if (tune.jumpDodge && p.airCd <= 0 && p.airT <= 0 && ddist < 90) {
+          intents.jump = true; // dash on cooldown — hop the throw instead
+        } else {
+          mvx += dangerVec[0];
+          mvy += dangerVec[1];
+        }
       }
     }
   } else {

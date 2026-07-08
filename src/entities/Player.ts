@@ -20,15 +20,16 @@ const SLASH_ACTIVE = 0.12; // seconds the blade is "live"
 const SLASH_CD = 0.42; // base melee cooldown
 const SLASH_CD_FAST = 0.24; // with EXTRA (dual-wield)
 const MAX_CURVE = 1.8; // rad/s angular velocity at full charge
-const BASE_CURVE = 0.5; // rad/s baseline bank on even an uncharged throw — every
+const BASE_CURVE = 0.35; // rad/s baseline bank on even an uncharged throw — every
 //                          flight arcs out and loops back, the boomerang's signature
-const RESPAWN_TIME = 1.2; // delay before a lost boomerang returns to hand
+//                          (kept gentle so quick flicks fly true where you aim)
+const RESPAWN_TIME = 0.9; // delay before a lost boomerang returns to hand
 const JUMP_TIME = 0.5; // seconds airborne per hop
 const JUMP_H = 30; // peak visual height of a hop
 const JUMP_CD = 0.85; // hop cooldown
 
 interface AIState {
-  tThink: number;
+  tThink: number; // countdown to the next decision refresh (the bot's "reaction time")
   target: Player | null;
   strafe: number;
   tStrafe: number;
@@ -37,6 +38,11 @@ interface AIState {
   goPower: PowerKey | null;
   dodgeBoom: Boomerang | null; // the incoming throw we last reacted to
   dodgeActive: boolean; // whether we committed to actively dodging dodgeBoom
+  dodgeDelayT: number; // reaction latency left before a committed dodge fires
+  parryRoll: boolean; // pre-rolled: will we try to slash-parry dodgeBoom?
+  aimErr: number; // current aim error (radians), resampled each decision tick
+  meleeT: number; // point-blank slash windup countdown (-1 = not armed)
+  range: number; // preferred fighting distance — per-bot personality
 }
 
 interface PlayerStats {
@@ -163,6 +169,11 @@ export class Player {
       goPower: null,
       dodgeBoom: null,
       dodgeActive: false,
+      dodgeDelayT: 0,
+      parryRoll: false,
+      aimErr: 0,
+      meleeT: -1,
+      range: rand(205, 285), // each bot prefers its own spacing — varied personalities
     };
   }
 
@@ -697,7 +708,8 @@ export class Player {
     const speed = 430 + charge * 230;
     // WEAK ARM (anti-power): the boomerang turns back at half the usual range.
     const outTime = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
-    const curve = BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE); // longer hold => tighter loop
+    // longer hold => tighter loop; sideways momentum picks which way it banks
+    const curve = (BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE)) * this.curveSide();
     const main = new Boomerang(this, ax * speed, ay * speed, outTime, true);
     main.curve = curve;
     // The Golden Boomerang carrier's modifiers are suspended — a plain throw only.
@@ -717,6 +729,14 @@ export class Player {
     game.boomerangs.push(main);
     this.boomsInHand--;
     audio.throw_();
+  }
+
+  /** Which way a throw banks: strafing sideways relative to your aim carries
+   *  that momentum into the curve (move left of aim → bank left), so the arc
+   *  is player-steerable. Standing still keeps the classic clockwise loop. */
+  private curveSide(): number {
+    const cross = this.aim[0] * this.vy - this.aim[1] * this.vx;
+    return Math.hypot(this.vx, this.vy) > 40 && Math.abs(cross) > 30 ? Math.sign(cross) : 1;
   }
 
   /** A boomerang of ours left play uncaught — schedule its return to hand. */
@@ -1022,7 +1042,8 @@ export class Player {
     const charge = clamp(this.charge, 0.12, 1);
     const speed = (430 + charge * 230) * (this.powers.has('BIG') ? 0.85 : 1);
     let outT = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
-    const curve = this.powers.has('TELEKINESIS') ? 0 : BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE);
+    // mirror doThrow's bank-side choice so the dots always tell the truth
+    const curve = this.powers.has('TELEKINESIS') ? 0 : (BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE)) * this.curveSide();
     let px = this.x + this.aim[0] * (this.r + 6);
     let py = this.y + this.aim[1] * (this.r + 6);
     let vx = this.aim[0] * speed;

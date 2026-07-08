@@ -524,7 +524,7 @@ function drawHelp(): void {
   const controls: [string, string][] = [
     ['WASD', 'Move'],
     ['MOUSE', 'Aim'],
-    ['LMB', 'Throw · hold to charge & curve'],
+    ['LMB', 'Throw · charge & strafe to bank'],
     ['RMB / E', 'Slash foes & parry boomerangs'],
     ['SPACE', 'Dash'],
     ['SHIFT / F', 'Hop over danger'],

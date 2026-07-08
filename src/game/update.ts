@@ -106,6 +106,31 @@ function mouseIntents(p: Player): Intents {
   };
 }
 
+/**
+ * Soft aim assist for humans on 8-way keys or a stick: if an enemy sits within
+ * a narrow cone of where they're pointing, bend the aim toward that foe. Mouse
+ * players aim pixel-perfect already, so only the coarse devices get the help —
+ * it keeps keyboard/gamepad throws competitive without ever aiming for you.
+ */
+function assistAim(p: Player, aim: Vec2): Vec2 {
+  let best: Player | null = null;
+  let bestDot = 0.92; // ≈ ±23° cone — outside it, your aim is your aim
+  for (const q of game.players) {
+    if (!q.alive || q.disguised || !p.isEnemy(q)) continue;
+    const d = dist(p.x, p.y, q.x, q.y);
+    if (d > 520 || d < 1) continue;
+    const dir = norm(q.x - p.x, q.y - p.y);
+    const dot = dir[0] * aim[0] + dir[1] * aim[1];
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = q;
+    }
+  }
+  if (!best) return aim;
+  const dir = norm(best.x - p.x, best.y - p.y);
+  return norm(lerp(aim[0], dir[0], 0.65), lerp(aim[1], dir[1], 0.65));
+}
+
 interface KeyScheme {
   up: string;
   down: string;
@@ -133,7 +158,7 @@ function keyboardIntents(p: Player, s: KeyScheme): Intents {
   if (keys[s.down]) my += 1;
   if (keys[s.left]) mx -= 1;
   if (keys[s.right]) mx += 1;
-  const aim: Vec2 = mx || my ? norm(mx, my) : p.aim;
+  const aim: Vec2 = assistAim(p, mx || my ? norm(mx, my) : p.aim);
   return {
     move: [mx, my],
     aimX: aim[0],
@@ -153,7 +178,7 @@ function gamepadIntents(p: Player, padIndex: number): Intents {
   const pad = readGamepad(padIndex);
   if (!pad) return { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
   const [mx, my] = pad.move;
-  const aim: Vec2 = pad.aim ? norm(pad.aim[0], pad.aim[1]) : mx || my ? norm(mx, my) : p.aim;
+  const aim: Vec2 = assistAim(p, pad.aim ? norm(pad.aim[0], pad.aim[1]) : mx || my ? norm(mx, my) : p.aim);
   return {
     move: [mx, my],
     aimX: aim[0],
