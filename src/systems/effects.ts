@@ -6,7 +6,32 @@ import type { Char, Vec2 } from '../types';
 /** Particle-burst helpers that push effects into the global particle pool. */
 
 export function spawnSlice(x: number, y: number, char: Char, dirx: number, diry: number): void {
-  for (let i = 0; i < 18; i++) {
+  // The signature beat: the fighter splits into two body halves that tumble
+  // apart along the cut line, pale interiors showing. The cut runs along the
+  // killing blow's travel; the halves separate perpendicular to it.
+  const cutA = dirx || diry ? Math.atan2(diry, dirx) : rand(0, TAU);
+  const px = -Math.sin(cutA);
+  const py = Math.cos(cutA);
+  for (const side of [-1, 1]) {
+    const half = new Particle(
+      x + px * side * 3,
+      y + py * side * 3,
+      dirx * 110 + px * side * rand(70, 130) + rand(-15, 15),
+      diry * 110 + py * side * rand(70, 130) - rand(30, 80),
+      rand(0.75, 0.95),
+      char.body,
+      17,
+      'half'
+    );
+    half.rot = 0;
+    half.vr = side * rand(1.6, 4.5);
+    half.char = char;
+    half.aimV = [Math.cos(cutA), Math.sin(cutA)];
+    half.sliceA = cutA;
+    half.side = side;
+    game.particles.push(half);
+  }
+  for (let i = 0; i < 10; i++) {
     const a = rand(0, TAU);
     const sp = rand(60, 320);
     game.particles.push(
@@ -31,6 +56,7 @@ export function spawnSlice(x: number, y: number, char: Char, dirx: number, diry:
 }
 
 export function spawnExplosion(x: number, y: number): void {
+  game.flash = Math.max(game.flash, 0.14); // a full-screen blink of blast light
   for (let i = 0; i < 26; i++) {
     const a = rand(0, TAU);
     const sp = rand(80, 420);

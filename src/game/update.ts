@@ -1,10 +1,10 @@
 import { audio } from '../core/audio';
-import { W } from '../constants';
+import { BOUNDS, W } from '../constants';
 import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse, readGamepad } from '../core/input';
 import { aiThink } from '../systems/ai';
 import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
-import { spawnConfetti, spawnRing } from '../systems/effects';
+import { spawnConfetti, spawnPopText, spawnRing } from '../systems/effects';
 import { POWERS } from '../data/powers';
 import { Particle } from '../entities/Particle';
 import { game } from './state';
@@ -221,6 +221,7 @@ export function update(dt: number): void {
   }
   game.time += dt;
   game.shake = Math.max(0, game.shake - dt * 40);
+  game.flash = Math.max(0, game.flash - dt);
   if (game.fightT > 0) game.fightT = Math.max(0, game.fightT - raw);
 
   // age the power-pickup toasts & floor decals
@@ -266,6 +267,51 @@ export function update(dt: number): void {
           game.pickupTimer = rand(5, 8.5);
         } else {
           game.pickupTimer = rand(2, 3.5); // leader heavily buffed — retry sooner, spawn less
+        }
+      }
+    }
+
+    // Sudden death stall-breaker: long rounds get squeezed by a wall of fire
+    // creeping in from the arena borders, forcing the kiters together. Hide &
+    // Seek is exempt (it runs its own hunt clock).
+    game.roundT += dt;
+    if (game.mode !== 3) {
+      const SUDDEN_AT = 45;
+      if (!game.hurry && game.roundT >= SUDDEN_AT - 5) {
+        game.hurry = true;
+        spawnPopText(W / 2, 130, 'HURRY UP!', '#ffce54', 24);
+        audio.tick();
+      }
+      if (!game.sudden && game.roundT >= SUDDEN_AT) {
+        game.sudden = true;
+        game.raining = false; // the closing inferno dries the rain right up
+        spawnPopText(W / 2, 130, 'SUDDEN DEATH!', '#ff5d6c', 30);
+        audio.power();
+        game.shake = Math.max(game.shake, 8);
+      }
+      if (game.sudden) {
+        game.suddenEnc = Math.min(8 + (game.roundT - SUDDEN_AT) * 9, 200);
+        const e = game.suddenEnc;
+        for (const p of game.players) {
+          if (!p.alive) continue;
+          if (p.x < BOUNDS.l + e || p.x > BOUNDS.r - e || p.y < BOUNDS.t + e || p.y > BOUNDS.b - e) p.ignite(null);
+        }
+        // embers drifting off the advancing fire line
+        if (Math.random() < 0.6) {
+          const l = BOUNDS.l + e;
+          const r = BOUNDS.r - e;
+          const t = BOUNDS.t + e;
+          const b = BOUNDS.b - e;
+          let ex: number;
+          let ey: number;
+          if (Math.random() < 0.5) {
+            ex = rand(l, r);
+            ey = Math.random() < 0.5 ? t : b;
+          } else {
+            ex = Math.random() < 0.5 ? l : r;
+            ey = rand(t, b);
+          }
+          game.particles.push(new Particle(ex, ey, rand(-14, 14), rand(-42, -10), rand(0.3, 0.6), Math.random() < 0.5 ? '#ff7b3a' : '#ffce54', rand(2, 4)));
         }
       }
     }

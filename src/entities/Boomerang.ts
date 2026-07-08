@@ -1,6 +1,6 @@
 import { ctx } from '../core/canvas';
 import { audio } from '../core/audio';
-import { dist, lerp, norm, TAU } from '../core/math';
+import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { BOUNDS } from '../constants';
 import { OBSTACLES } from '../data/arena';
 import { drawBoomShape } from '../gfx/shapes';
@@ -8,6 +8,7 @@ import { circleRect, resolvePortals } from '../systems/collision';
 import { spawnDecal, spawnExplosion, spawnPopText, spawnRing } from '../systems/effects';
 import { game } from '../game/state';
 import { FirePatch } from './FirePatch';
+import { Particle } from './Particle';
 import type { Player } from './Player';
 
 /**
@@ -216,6 +217,12 @@ export class Boomerang {
     }
     if (bounced) {
       this.bounceFlash = 0.12;
+      // a little shower of impact sparks at the ricochet point
+      for (let i = 0; i < 4; i++) {
+        game.particles.push(
+          new Particle(this.x, this.y, rand(-150, 150), rand(-150, 150), rand(0.12, 0.26), Math.random() < 0.5 ? '#fff' : this.origOwner.char.body, rand(1.5, 3))
+        );
+      }
       if (Math.random() < 0.5) audio.tick();
     }
 

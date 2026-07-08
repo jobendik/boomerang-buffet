@@ -2,11 +2,13 @@ import { ctx } from '../core/canvas';
 import { clamp, rand, TAU } from '../core/math';
 import { roundRectPath } from '../gfx/shapes';
 import { fontD } from '../ui/widgets';
+import type { Char, Vec2 } from '../types';
 
-export type ParticleKind = 'spark' | 'chunk' | 'ring' | 'text' | 'confetti';
+export type ParticleKind = 'spark' | 'chunk' | 'ring' | 'text' | 'confetti' | 'half' | 'ghost';
 
 /** A short-lived visual effect particle (spark, food chunk, expanding ring,
- *  floating popup text or a fluttering confetti snip). */
+ *  floating popup text, a fluttering confetti snip, a tumbling sliced body
+ *  half, or a fading dash afterimage). */
 export class Particle {
   x: number;
   y: number;
@@ -20,6 +22,11 @@ export class Particle {
   rot: number;
   vr: number;
   text: string;
+  /* extra payload for the character-bearing kinds ('half' & 'ghost') */
+  char: Char | null;
+  aimV: Vec2;
+  sliceA: number; // 'half': angle of the cut line through the body
+  side: number; // 'half': which half-plane of the cut this piece keeps
 
   constructor(
     x: number,
@@ -44,11 +51,25 @@ export class Particle {
     this.text = text;
     this.rot = rand(0, TAU);
     this.vr = rand(-8, 8);
+    this.char = null;
+    this.aimV = [1, 0];
+    this.sliceA = 0;
+    this.side = 1;
   }
 
   /** @returns whether the particle is still alive after this step. */
   update(dt: number): boolean {
     this.life -= dt;
+    if (this.kind === 'ghost') return this.life > 0; // holds its pose, just fades
+    if (this.kind === 'half') {
+      // a sliced body half: sails apart from the cut, tumbling under gravity
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      this.vx *= Math.pow(0.5, dt);
+      this.vy += 460 * dt;
+      this.rot += this.vr * dt;
+      return this.life > 0;
+    }
     if (this.kind === 'confetti') {
       // flutter: gentle fall + sideways sway, light drag
       this.rot += this.vr * dt;
@@ -75,7 +96,32 @@ export class Particle {
   draw(): void {
     const a = clamp(this.life / this.max, 0, 1);
     ctx.globalAlpha = a;
-    if (this.kind === 'chunk') {
+    if (this.kind === 'half' && this.char) {
+      // one half of a sliced fighter: the full character clipped to a
+      // half-plane along the cut, with a pale band suggesting the cut face
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, a * 2.2);
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rot);
+      const S = this.size * 2.4;
+      ctx.rotate(this.sliceA);
+      ctx.beginPath();
+      ctx.rect(-S, this.side < 0 ? -S : 0, S * 2, S);
+      ctx.rotate(-this.sliceA);
+      ctx.clip();
+      this.char.draw(this.char, this.size, this.aimV);
+      ctx.rotate(this.sliceA);
+      ctx.fillStyle = 'rgba(255,243,223,.9)';
+      ctx.fillRect(-this.size * 0.85, this.side < 0 ? -3 : 0, this.size * 1.7, 3);
+      ctx.restore();
+    } else if (this.kind === 'ghost' && this.char) {
+      // dash afterimage: a translucent snapshot of the fighter, frozen mid-bolt
+      ctx.save();
+      ctx.globalAlpha = a * 0.35;
+      ctx.translate(this.x, this.y);
+      this.char.draw(this.char, this.size, this.aimV);
+      ctx.restore();
+    } else if (this.kind === 'chunk') {
       ctx.save();
       ctx.translate(this.x, this.y);
       ctx.rotate(this.rot);

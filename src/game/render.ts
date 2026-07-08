@@ -63,6 +63,11 @@ export function render(): void {
   }
 
   drawWorld();
+  // blink of blast light over the field (HUD stays crisp above it)
+  if (game.flash > 0) {
+    ctx.fillStyle = `rgba(255,240,214,${(game.flash / 0.14) * 0.26})`;
+    ctx.fillRect(0, 0, W, H);
+  }
   drawHUD();
 
   if (game.state === 'countdown') {

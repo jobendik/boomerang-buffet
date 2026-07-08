@@ -7,7 +7,7 @@ import { arena, OBSTACLES, SPAWNS } from '../data/arena';
 import { POWERS, EXCLUSIVE_GROUPS, type PowerKey } from '../data/powers';
 import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
 import { circleRect, resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
-import { spawnDashPuff, spawnExplosion, spawnFootDust, spawnPopText, spawnRing, spawnSlice } from '../systems/effects';
+import { spawnConfetti, spawnDashPuff, spawnExplosion, spawnFootDust, spawnPopText, spawnRing, spawnSlice } from '../systems/effects';
 import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
 import { Particle } from './Particle';
@@ -117,6 +117,9 @@ export class Player {
   shieldFlash!: number;
   moveK!: number; // 0 idle … 1 running, smoothed (drives the walk wobble)
   dustT!: number; // footstep dust cadence
+  ghostT!: number; // dash afterimage cadence
+  streak!: number; // kills chained inside the streak window
+  streakT!: number; // remaining streak window
   squashT!: number; // landing/dash squash timer (visual)
   disguised!: boolean; // DISGUISE: held still long enough to look like scenery
   disguiseT!: number; // seconds of stillness accumulated toward disguising
@@ -210,6 +213,9 @@ export class Player {
     this.shieldFlash = 0;
     this.moveK = 0;
     this.dustT = 0;
+    this.ghostT = 0;
+    this.streak = 0;
+    this.streakT = 0;
     this.squashT = 0;
     this.disguised = false;
     this.disguiseT = 0;
@@ -310,6 +316,10 @@ export class Player {
     if (this.slashT > 0) this.slashT = Math.max(0, this.slashT - dt);
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
     if (this.frozen > 0) this.frozen = Math.max(0, this.frozen - dt);
+    if (this.streakT > 0) {
+      this.streakT -= dt;
+      if (this.streakT <= 0) this.streak = 0;
+    }
 
     // JUMP / vertical dodge: while airborne, rise on a parabolic arc and stay
     // untouchable (we top up invuln, so every existing damage guard skips us —
@@ -511,10 +521,20 @@ export class Player {
       }
     }
 
-    // friction during dash decay
+    // friction during dash decay + a trail of translucent afterimages
     if (this.dashT > 0) {
       this.vx *= Math.pow(0.02, dt);
       this.vy *= Math.pow(0.02, dt);
+      this.ghostT -= dt;
+      if (this.ghostT <= 0) {
+        this.ghostT = 0.045;
+        const g = new Particle(this.x, this.y, 0, 0, 0.26, this.char.body, this.r, 'ghost');
+        g.char = this.char;
+        g.aimV = [this.aim[0], this.aim[1]];
+        game.particles.push(g);
+      }
+    } else {
+      this.ghostT = 0;
     }
 
     // integrate (axis-separated so we slide along walls instead of snagging)
@@ -583,7 +603,13 @@ export class Player {
       } else {
         if (intents.throwHeld && this.armed) {
           this.charging = true;
+          const before = this.charge;
           this.charge = clamp(this.charge + dt / 0.55, 0, 1);
+          // fully wound: a quick ping so max charge is felt, not watched for
+          if (before < 1 && this.charge >= 1) {
+            spawnRing(this.x, this.y, '#ffd23a', 0.7);
+            audio.tick();
+          }
         }
         if (!intents.throwHeld && this.charging) {
           // release
@@ -828,6 +854,15 @@ export class Player {
     this.stats.deaths++;
     if (killer && killer !== this) {
       killer.stats.kills++;
+      // kill-streak fanfare: kills chained inside the window escalate the pop
+      killer.streak = killer.streakT > 0 ? killer.streak + 1 : 1;
+      killer.streakT = 2.2;
+      if (killer.alive && killer.streak >= 2) {
+        const label = killer.streak === 2 ? 'DOUBLE KILL!' : killer.streak === 3 ? 'TRIPLE KILL!' : 'RAMPAGE!';
+        spawnPopText(killer.x, killer.y - killer.r - 14, label, '#ffd23a', 18 + killer.streak * 2);
+        spawnConfetti(killer.x, killer.y - 20, 4 + killer.streak * 3);
+        audio.power();
+      }
       if (wasFrozen) killer.stats.frozenKills++; // "Ice Breaker"
       if (killer.bamboozled > 0) killer.stats.bamboozledKills++; // "Drunken Master"
       // a kill landed by a dead fighter (their boomerang/bomb/Last Laugh blast

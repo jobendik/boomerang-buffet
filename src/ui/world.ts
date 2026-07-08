@@ -114,6 +114,47 @@ function drawDecoy(d: Decoy): void {
   }
 }
 
+/** Sudden death: a scorching band creeping in from the arena borders. */
+function drawSudden(): void {
+  if (!game.sudden || game.suddenEnc <= 0) return;
+  const e = game.suddenEnc;
+  const l = WALL + e;
+  const t = WALL + e;
+  const r = W - WALL - e;
+  const b = H - WALL - e;
+  ctx.save();
+  // burnt wash over everything outside the safe rectangle
+  ctx.fillStyle = 'rgba(255,70,25,.17)';
+  ctx.beginPath();
+  ctx.rect(WALL, WALL, W - WALL * 2, H - WALL * 2);
+  ctx.rect(l, t, r - l, b - t);
+  ctx.fill('evenodd');
+  // the advancing fire line, flickering
+  const pulse = 0.5 + 0.35 * Math.sin(game.time * 9);
+  ctx.strokeStyle = `rgba(255,150,40,${pulse})`;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(l, t, r - l, b - t);
+  ctx.restore();
+}
+
+/** Soft darkening toward the frame edges — cached once, gives the flat-lit
+ *  field a touch of depth and pulls the eye to the action in the middle. */
+let vigCanvas: HTMLCanvasElement | null = null;
+function drawVignette(): void {
+  if (!vigCanvas) {
+    vigCanvas = document.createElement('canvas');
+    vigCanvas.width = W;
+    vigCanvas.height = H;
+    const c = vigCanvas.getContext('2d')!;
+    const g = c.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, H * 0.95);
+    g.addColorStop(0, 'rgba(10,6,16,0)');
+    g.addColorStop(1, 'rgba(10,6,16,.4)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+  }
+  ctx.drawImage(vigCanvas, 0, 0, W, H);
+}
+
 /** Battle Royale: a lethal red wash outside the closing safe circle. */
 function drawBattleRoyale(): void {
   const br = game.br;
@@ -170,6 +211,10 @@ export function drawWorld(): void {
   for (const p of game.particles) p.draw();
   // Battle Royale boundary overlay sits above the field
   if (game.br) drawBattleRoyale();
+  // sudden-death fire band closes in over everything
+  drawSudden();
   // weather overlay last, over the whole field
   if (game.raining) drawWeather();
+  // vignette caps the frame for depth (HUD is drawn after, unaffected)
+  drawVignette();
 }

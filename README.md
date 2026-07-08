@@ -113,9 +113,15 @@ the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
   **slick ice floors** that turn footwork into drifting.
 - **Dynamic economy** — power-book spawn odds decay the more powers the leading
   fighter already holds, to curb snowballing.
-- **Cinematic feel** — slow-motion on round-deciding kills, hitstop, screen
-  shake, kill popups, squash-and-stretch fighters, scorch decals and a charged
-  throw trajectory preview.
+- **Sudden death** — rounds that stall past 45 seconds get a "HURRY UP!"
+  warning, then a wall of fire creeps in from the arena borders until someone
+  settles it (Hide & Seek keeps its own clock).
+- **Cinematic feel** — fighters are *sliced into two tumbling halves* on death
+  (interiors showing), slow-motion on round-deciding kills, hitstop, screen
+  shake, blast screen-flash, dash afterimages, ricochet sparks, kill-streak
+  fanfare (DOUBLE KILL! / TRIPLE KILL! / RAMPAGE!), kill popups,
+  squash-and-stretch fighters, scorch decals, a soft vignette and a charged
+  throw trajectory preview with a max-charge ping.
 - **Match-end awards** — post-match telemetry hands out comedic awards on a
   podium screen (Fastest Reflexes, Ice Breaker, Pyromaniac, Short Fuse,
   Drunken Master, Slow Learner, …).
