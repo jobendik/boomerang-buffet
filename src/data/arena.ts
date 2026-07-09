@@ -117,9 +117,10 @@ export const ARENAS: Arena[] = [
       { x: 876, y: 292, w: 52, h: 56, dx: -240, dy: 0, period: 3.6, phase: 0.5 },
     ],
     // bottom corners loop to each other; a centre pair leaps the mid block
+    // (triggers pulled ≥40px off the corner spawns so nobody wakes up inside one)
     portals: [
-      { ax: 140, ay: 512, bx: 884, by: 512, r: 24 },
-      { ax: 512, ay: 160, bx: 512, by: 540, r: 24 },
+      { ax: 160, ay: 512, bx: 864, by: 512, r: 24 },
+      { ax: 512, ay: 168, bx: 512, by: 506, r: 24 },
     ],
     // each gate walls off one side of the centre block; its switch sits on the
     // diagonally opposite approach, so opening a lane is a commitment
@@ -163,8 +164,8 @@ export const ARENAS: Arena[] = [
       { x: 440, y: 420, w: 92, h: 70 },
     ],
     crushers: [],
-    // a single shortcut portal across the grove
-    portals: [{ ax: 130, ay: 140, bx: 894, by: 500, r: 26 }],
+    // a single shortcut portal across the grove (clear of the corner spawns)
+    portals: [{ ax: 150, ay: 160, bx: 874, by: 480, r: 26 }],
     gates: [],
     switches: [],
     spawns: [
@@ -219,6 +220,127 @@ export const ARENAS: Arena[] = [
       { x: 929, y: 545 },
       { x: 512, y: 104 },
       { x: 512, y: 560 },
+    ],
+  },
+  {
+    name: 'Skyline',
+    tagline: 'Catwalks over the void — one wrong step…',
+    biome: 'rooftop',
+    floorA: '#2b2a3f',
+    floorB: '#252339',
+    accent: '#c08bff',
+    // small parapets give the corners cover; the void does the rest
+    obstacles: [
+      { x: 200, y: 110, w: 70, h: 40 },
+      { x: 754, y: 110, w: 70, h: 40 },
+      { x: 200, y: 490, w: 70, h: 40 },
+      { x: 754, y: 490, w: 70, h: 40 },
+      { x: 472, y: 280, w: 80, h: 80 }, // rooftop AC unit, centre cover
+    ],
+    // long drops carve the roof into a ring of catwalks around a central plaza
+    pits: [
+      { x: 352, y: 80, w: 320, h: 90 },
+      { x: 352, y: 470, w: 320, h: 90 },
+      { x: 180, y: 250, w: 140, h: 140 },
+      { x: 704, y: 250, w: 140, h: 140 },
+    ],
+    bushes: [
+      { x: 340, y: 280, w: 70, h: 80 },
+      { x: 614, y: 280, w: 70, h: 80 },
+    ],
+    crushers: [],
+    // crossed diagonal portals — bail out of a cornered catwalk in style
+    portals: [
+      { ax: 90, ay: 180, bx: 934, by: 460, r: 24 },
+      { ax: 934, ay: 180, bx: 90, by: 460, r: 24 },
+    ],
+    gates: [],
+    switches: [],
+    spawns: [
+      { x: 95, y: 95 },
+      { x: 929, y: 95 },
+      { x: 95, y: 545 },
+      { x: 929, y: 545 },
+      { x: 86, y: 320 },
+      { x: 938, y: 320 },
+    ],
+  },
+  {
+    name: 'Bazaar',
+    tagline: 'Three lanes, two sweepers, no refunds',
+    biome: 'neon',
+    floorA: '#2d1f3d',
+    floorB: '#271a35',
+    accent: '#ffce54',
+    // market stalls form three long fighting lanes
+    obstacles: [
+      { x: 220, y: 150, w: 180, h: 34 },
+      { x: 624, y: 150, w: 180, h: 34 },
+      { x: 220, y: 456, w: 180, h: 34 },
+      { x: 624, y: 456, w: 180, h: 34 },
+      { x: 422, y: 303, w: 180, h: 34 }, // the centre stall
+    ],
+    pits: [],
+    bushes: [
+      { x: 100, y: 140, w: 70, h: 60 },
+      { x: 854, y: 140, w: 70, h: 60 },
+      { x: 100, y: 440, w: 70, h: 60 },
+      { x: 854, y: 440, w: 70, h: 60 },
+    ],
+    // two long sweepers patrol the inter-lane aisles in counter-phase
+    crushers: [
+      { x: 96, y: 212, w: 52, h: 56, dx: 300, dy: 0, period: 4.0, phase: 0 },
+      { x: 876, y: 372, w: 52, h: 56, dx: -300, dy: 0, period: 4.0, phase: 0.5 },
+    ],
+    // a vertical shortcut past the centre stall
+    portals: [{ ax: 512, ay: 80, bx: 512, by: 560, r: 22 }],
+    gates: [],
+    switches: [],
+    spawns: [
+      { x: 95, y: 95 },
+      { x: 929, y: 95 },
+      { x: 95, y: 545 },
+      { x: 929, y: 545 },
+      { x: 86, y: 320 },
+      { x: 938, y: 320 },
+    ],
+  },
+  {
+    name: 'Glacier',
+    tagline: 'Drift fast, brake early, mind the crevasse',
+    biome: 'ice',
+    slick: true, // icy footing over open crevasses — the high-skill floor
+    floorA: '#2a3950',
+    floorB: '#243348',
+    accent: '#bdf0ff',
+    // sheared ice shelves flank the central crevasse
+    obstacles: [
+      { x: 300, y: 290, w: 120, h: 36 },
+      { x: 604, y: 290, w: 120, h: 36 },
+      { x: 150, y: 150, w: 64, h: 64 },
+      { x: 810, y: 426, w: 64, h: 64 },
+    ],
+    // the crevasse field: a central rift plus two point-symmetric side cracks
+    pits: [
+      { x: 462, y: 250, w: 100, h: 140 },
+      { x: 240, y: 120, w: 110, h: 90 },
+      { x: 674, y: 430, w: 110, h: 90 },
+    ],
+    bushes: [
+      { x: 452, y: 80, w: 120, h: 70 },
+      { x: 452, y: 490, w: 120, h: 70 },
+    ],
+    crushers: [],
+    portals: [],
+    gates: [],
+    switches: [],
+    spawns: [
+      { x: 95, y: 95 },
+      { x: 929, y: 95 },
+      { x: 95, y: 545 },
+      { x: 929, y: 545 },
+      { x: 86, y: 320 },
+      { x: 938, y: 320 },
     ],
   },
 ];

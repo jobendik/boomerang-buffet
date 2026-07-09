@@ -302,6 +302,31 @@ function segmented(x: number, y: number, w: number, h: number, options: string[]
   });
 }
 
+/** Wrap-around option cycler: ◀ [ value ] ▶ across the full width. */
+function cycler(x: number, y: number, w: number, h: number, value: string, act: string): void {
+  const bs = 34;
+  for (const [sym, suffix, bx] of [['◀', '-', x], ['▶', '+', x + w - bs]] as const) {
+    const hov = hot(bx, y, bs, h);
+    ctx.fillStyle = hov ? UI.gold : 'rgba(255,255,255,.14)';
+    roundRectPath(bx, y, bs, h, 9);
+    ctx.fill();
+    ctx.fillStyle = hov ? UI.ink : UI.cream;
+    ctx.font = fontB(14, 900);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sym, bx + bs / 2, y + h / 2 + 1);
+    hits.push({ x: bx, y, w: bs, h, act: act + suffix });
+  }
+  ctx.fillStyle = 'rgba(255,255,255,.1)';
+  roundRectPath(x + bs + 6, y, w - bs * 2 - 12, h, 9);
+  ctx.fill();
+  ctx.fillStyle = UI.gold;
+  ctx.font = fontD(17);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(value, x + w / 2, y + h / 2 + 1);
+}
+
 /** Label + − value + stepper. */
 function stepper(x: number, y: number, w: number, label: string, value: string, act: string): void {
   ctx.fillStyle = UI.dim;
@@ -451,7 +476,9 @@ function drawSetup(): void {
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(13, 900);
   ctx.fillText('ARENA', rx, 204);
-  segmented(rx, 214, rw, 32, ['Random', ...ARENAS.map((a) => a.name)], game.arenaSel + 1, 'arena');
+  // wrap-around cycler (◀ name ▶) — scales to any number of arenas, unlike
+  // the segmented row it replaced, which ran out of width past five names
+  cycler(rx, 214, rw, 32, game.arenaSel < 0 ? 'Random' : ARENAS[game.arenaSel].name, 'arenaCycle');
   ctx.fillStyle = 'rgba(255,243,223,.6)';
   ctx.font = fontB(12, 700);
   ctx.textAlign = 'left';
@@ -692,6 +719,13 @@ export function handleMenuClick(): void {
         break;
       case 'arena':
         game.arenaSel = clamp(parseInt(arg, 10) - 1, -1, ARENAS.length - 1);
+        break;
+      // the ◀ ▶ cycler wraps through Random (-1) and every arena
+      case 'arenaCycle-':
+        game.arenaSel = game.arenaSel <= -1 ? ARENAS.length - 1 : game.arenaSel - 1;
+        break;
+      case 'arenaCycle+':
+        game.arenaSel = game.arenaSel >= ARENAS.length - 1 ? -1 : game.arenaSel + 1;
         break;
       case 'diff':
         game.difficulty = clamp(parseInt(arg, 10), 0, 2);

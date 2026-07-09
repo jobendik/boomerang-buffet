@@ -18,7 +18,16 @@ npm run dev      # start the dev server (opens the browser)
 npm run build    # type-check + production build into dist/
 npm run preview  # preview the production build
 npm run typecheck
+npm test         # headless sim suite: AI balance guardrails + arena integrity
+npm run sim      # print the AI tuning KPI table (round pacing, lethality,
+                 # aggro spread, idle vs dodging survival per difficulty)
 ```
+
+The test suite runs the **real game loop headlessly** (jsdom + a stubbed
+canvas), fast-forwarding whole bot matches in milliseconds — so AI difficulty
+is tuned against measured numbers (see `tests/sim.ts`), and every arena's
+layout is validated programmatically (spawn clearances, switch/gate wiring,
+and a bots-can-actually-finish-a-match liveness check).
 
 ## Controls
 
@@ -106,7 +115,7 @@ the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
 - **Game modes** — *Free-for-All*, *Team Up* (two squads, friendly-fire off),
   *Golden Boomerang* (hold the artifact a cumulative N seconds to win — your
   power-ups are suspended while you carry it), and *Hide & Seek*.
-- **Arenas & hazards** — five biome-themed arenas (or random each round):
+- **Arenas & hazards** — eight biome-themed arenas (or random each round):
   bottomless **pits** (dash or hop to leap them), linked **teleporters** that
   preserve momentum, **crusher pistons**, **floor switches** that retract
   colour-matched **gates**, leafy **bushes** for stealth, and the Freezer's
@@ -147,7 +156,7 @@ src/
 ├─ data/              # static, declarative game data
 │  ├─ characters.ts   # the twelve food fighters + their vector art
 │  ├─ powers.ts       # power-up definitions (+ one-line descriptions)
-│  └─ arena.ts        # the five arena layouts (geometry, spawns, hazards)
+│  └─ arena.ts        # the eight arena layouts (geometry, spawns, hazards)
 │
 ├─ gfx/
 │  ├─ shapes.ts       # reusable canvas shape helpers
