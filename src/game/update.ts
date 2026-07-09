@@ -242,6 +242,29 @@ export function update(dt: number): void {
   if (game.state === 'matchover') {
     // confetti drifts over the podium for as long as the screen is up
     if (Math.random() < 0.2) spawnConfetti(rand(W * 0.1, W * 0.9), -14, 2);
+    // fireworks pop in the sky above the podium…
+    if (Math.random() < 0.022) {
+      const fx = rand(W * 0.15, W * 0.85);
+      const fy = rand(60, 210);
+      const col = ['#ff5d6c', '#ffce54', '#7ad06d', '#7ad0ff', '#ff7ad0', '#c08bff'][Math.floor(rand(0, 6))];
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * TAU + rand(-0.1, 0.1);
+        const sp = rand(90, 220);
+        game.particles.push(new Particle(fx, fy, Math.cos(a) * sp, Math.sin(a) * sp, rand(0.5, 0.9), col, rand(2, 4)));
+      }
+      spawnRing(fx, fy, col, 1.4);
+    }
+    // …and confetti cannons volley up from the podium's flanks
+    if (Math.random() < 0.014) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      for (let i = 0; i < 10; i++) {
+        const cols = ['#ff5d6c', '#ffce54', '#7ad06d', '#7ad0ff', '#ff7ad0', '#c08bff'];
+        game.particles.push(
+          new Particle(W / 2 + side * 110 + rand(-8, 8), 330, side * rand(-30, 90), rand(-360, -220), rand(1.8, 2.8), cols[i % cols.length], rand(5, 9), 'confetti')
+        );
+      }
+      audio.tick();
+    }
     game.particles = game.particles.filter((p) => p.update(dt));
     return;
   }

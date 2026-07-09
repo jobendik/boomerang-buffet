@@ -130,7 +130,13 @@ the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
   shake, blast screen-flash, dash afterimages, ricochet sparks, kill-streak
   fanfare (DOUBLE KILL! / TRIPLE KILL! / RAMPAGE!), kill popups,
   squash-and-stretch fighters, scorch decals, a soft vignette and a charged
-  throw trajectory preview with a max-charge ping.
+  throw trajectory preview with a max-charge ping. Bots visibly cock their
+  boomerang before a melee swing (the windup telegraph), chargers lean back
+  and tremble at full power, frozen fighters shiver in the ice, round winners
+  take a bow, and the match-over podium is a full celebration — a
+  three-move victory dance (pogo → 360° spin-jump → boomerang juggle) under
+  sweeping spotlights, fireworks and confetti cannons, while third place
+  visibly droops.
 - **Match-end awards** — post-match telemetry hands out comedic awards on a
   podium screen (Fastest Reflexes, Ice Breaker, Pyromaniac, Short Fuse,
   Drunken Master, Slow Learner, …).

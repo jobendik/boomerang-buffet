@@ -778,6 +778,7 @@ export class Player {
     audio.catch_();
     spawnRing(this.x, this.y, this.char.body, 0.9);
     game.shake = Math.max(game.shake, 3); // a satisfying little thunk on the catch
+    this.squashT = 0.15; // the body absorbs the snag with a quick squash
   }
 
   freeze(): void {
@@ -948,6 +949,16 @@ export class Player {
     ctx.rotate(Math.sin(this.bob * 1.35) * 0.055 * this.moveK);
     ctx.scale(popScale * (1 + sq * 0.16), popScale * (1 - sq * 0.18));
 
+    // wind-up body language: lean back while charging a throw, and tremble
+    // with barely-contained power once the charge is full
+    if (this.charging && this.charge > 0.1) {
+      ctx.translate(-this.aim[0] * this.charge * 3, -this.aim[1] * this.charge * 3);
+      ctx.rotate(-this.aim[0] * this.charge * 0.06);
+      if (this.charge >= 1) ctx.translate(rand(-0.8, 0.8), rand(-0.8, 0.8));
+    }
+    // frozen solid: shivering inside the ice block
+    if (this.frozen > 0) ctx.translate(Math.sin(game.time * 38) * 1.1, 0);
+
     // stacked power auras (one faint ring per active modifier)
     let ringIdx = 0;
     for (const key of this.powers) {
@@ -1065,11 +1076,21 @@ export class Player {
       const hbY = this.y + bobY - this.jumpZ;
       const a = Math.atan2(this.aim[1], this.aim[0]);
       const shown = this.slashT > 0 ? this.boomsInHand - 1 : this.boomsInHand;
-      for (let i = 0; i < shown; i++) {
+      // melee-windup telegraph: a bot about to swing cocks its boomerang high
+      // behind its shoulder, spinning fast and flashing white — the readable
+      // "get out of the way" cue that makes the windup mechanic fair
+      const windup = this.isAI && this.ai.meleeT > 0 && this.slashT <= 0;
+      for (let i = windup ? 1 : 0; i < shown; i++) {
         const off = (i - (shown - 1) / 2) * 0.5;
         const hx = this.x + Math.cos(a + off) * (this.r + 9);
         const hy = hbY + Math.sin(a + off) * (this.r + 9);
         drawBoomShape(hx, hy, 7, game.time * 6, this.char.dark);
+      }
+      if (windup && shown > 0) {
+        const wob = Math.sin(game.time * 24) * 0.12;
+        const wx = this.x + Math.cos(a - 1.15 + wob) * (this.r + 12);
+        const wy = hbY + Math.sin(a - 1.15 + wob) * (this.r + 12);
+        drawBoomShape(wx, wy, 10, game.time * 16, Math.floor(game.time * 16) % 2 ? '#fff' : this.char.dark);
       }
       if (this.charging && this.charge > 0.05) {
         ctx.strokeStyle = `hsl(${lerp(60, 0, this.charge)},100%,60%)`;
