@@ -12,6 +12,9 @@ import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flo
 import type { Intents, Vec2 } from '../types';
 import type { Player } from '../entities/Player';
 
+/** Cadence timer for the sudden-death heartbeat (module-local scratch state). */
+let heartT = 0;
+
 /** Battle Royale: shrink the safe circle and purge hostiles caught outside. */
 function updateBattleRoyale(dt: number): void {
   const br = game.br;
@@ -57,7 +60,7 @@ function updateGolden(dt: number): void {
       game.roundWinner = carrier;
       game.state = 'roundover';
       game.roundoverT = 2.2;
-      audio.win();
+      audio.roundWin();
     }
     return;
   }
@@ -67,7 +70,7 @@ function updateGolden(dt: number): void {
     if (p.alive && dist(p.x, p.y, g.x, g.y) < p.r + 16) {
       g.carrier = p;
       spawnRing(p.x, p.y, '#ffd23a', 1.3);
-      audio.power();
+      audio.golden();
       break;
     }
   }
@@ -244,6 +247,7 @@ export function update(dt: number): void {
     if (Math.random() < 0.2) spawnConfetti(rand(W * 0.1, W * 0.9), -14, 2);
     // fireworks pop in the sky above the podium…
     if (Math.random() < 0.022) {
+      audio.pop();
       const fx = rand(W * 0.15, W * 0.85);
       const fy = rand(60, 210);
       const col = ['#ff5d6c', '#ffce54', '#7ad06d', '#7ad0ff', '#ff7ad0', '#c08bff'][Math.floor(rand(0, 6))];
@@ -263,17 +267,20 @@ export function update(dt: number): void {
           new Particle(W / 2 + side * 110 + rand(-8, 8), 330, side * rand(-30, 90), rand(-360, -220), rand(1.8, 2.8), cols[i % cols.length], rand(5, 9), 'confetti')
         );
       }
-      audio.tick();
+      audio.pop();
     }
     game.particles = game.particles.filter((p) => p.update(dt));
     return;
   }
 
   if (game.state === 'countdown') {
+    const before = Math.ceil(game.countdownT);
     game.countdownT -= dt;
+    if (Math.ceil(game.countdownT) < before && game.countdownT > 0) audio.pip(); // 3…2…1 blips
     if (game.countdownT <= 0) {
       game.state = 'playing';
       game.fightT = 0.8; // "FIGHT!" splash
+      audio.fight();
     }
   }
 
@@ -311,16 +318,22 @@ export function update(dt: number): void {
       if (!game.hurry && game.roundT >= SUDDEN_AT - 5) {
         game.hurry = true;
         spawnPopText(W / 2, 130, 'HURRY UP!', '#ffce54', 24);
-        audio.tick();
+        audio.hurry();
       }
       if (!game.sudden && game.roundT >= SUDDEN_AT) {
         game.sudden = true;
         game.raining = false; // the closing inferno dries the rain right up
         spawnPopText(W / 2, 130, 'SUDDEN DEATH!', '#ff5d6c', 30);
-        audio.power();
+        audio.sudden();
         game.shake = Math.max(game.shake, 8);
       }
       if (game.sudden) {
+        // a pounding heartbeat that quickens as the fire wall closes in
+        heartT -= dt;
+        if (heartT <= 0) {
+          heartT = Math.max(0.42, 0.95 - (game.roundT - SUDDEN_AT) * 0.02);
+          audio.heartbeat();
+        }
         game.suddenEnc = Math.min(8 + (game.roundT - SUDDEN_AT) * 9, 200);
         const e = game.suddenEnc;
         for (const p of game.players) {
@@ -400,8 +413,13 @@ export function update(dt: number): void {
     game.hazards = game.hazards.filter((h) => h.update(dt));
     game.roundoverT -= dt;
     if (game.roundoverT <= 0) {
-      if (game.matchWinner) game.state = 'matchover';
-      else startRound();
+      if (game.matchWinner) {
+        game.state = 'matchover';
+        audio.music('podium');
+        // the podium fanfare — or a sad trombone moment if a bot took the crown
+        if (game.matchWinner.isAI) audio.matchLose();
+        else audio.matchWin();
+      } else startRound();
     }
   }
 

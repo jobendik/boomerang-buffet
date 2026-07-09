@@ -18,10 +18,12 @@ function frame(now: number): void {
   if (keys['Escape_edge']) {
     if (game.state === 'playing' || game.state === 'countdown' || game.state === 'roundover') {
       game.paused = !game.paused;
-      audio.pause();
+      if (game.paused) audio.pauseOpen();
+      else audio.pauseClose();
+      audio.setPauseDuck(game.paused); // music sinks underwater while paused
     } else if (game.state === 'menu' && game.menuPage !== 'title') {
       game.menuPage = 'title';
-      audio.tick();
+      audio.uiBack();
     }
   }
 

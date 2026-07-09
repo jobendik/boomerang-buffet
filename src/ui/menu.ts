@@ -56,6 +56,8 @@ interface Hit {
 
 const hits: Hit[] = [];
 let hoverAny = false;
+let hoverNow: string | null = null; // hovered element this frame…
+let hoverPrev: string | null = null; // …vs last frame, for the hover blip
 
 function pointIn(px: number, py: number, x: number, y: number, w: number, h: number): boolean {
   return px >= x && px <= x + w && py >= y && py <= y + h;
@@ -63,7 +65,10 @@ function pointIn(px: number, py: number, x: number, y: number, w: number, h: num
 
 function hot(x: number, y: number, w: number, h: number): boolean {
   const hov = pointIn(mouse.x, mouse.y, x, y, w, h);
-  if (hov) hoverAny = true;
+  if (hov) {
+    hoverAny = true;
+    hoverNow = x + ':' + y;
+  }
   return hov;
 }
 
@@ -76,10 +81,14 @@ function btn(x: number, y: number, w: number, h: number, label: string, act: str
 function beginScreen(): void {
   hits.length = 0;
   hoverAny = false;
+  hoverNow = null;
 }
 
 function endScreen(): void {
   canvas.style.cursor = hoverAny ? 'pointer' : 'default';
+  // a soft blip whenever the cursor slides onto a fresh interactive element
+  if (hoverNow && hoverNow !== hoverPrev) audio.uiHover();
+  hoverPrev = hoverNow;
 }
 
 /* ================================ TITLE =================================== */
@@ -680,7 +689,8 @@ export function drawMenu(): void {
 export function handleMenuClick(): void {
   for (const b of hits) {
     if (!pointIn(mouse.x, mouse.y, b.x, b.y, b.w, b.h)) continue;
-    audio.tick();
+    if (b.act === 'back') audio.uiBack();
+    else audio.uiClick();
     // per-tab control-scheme stepper hits look like 'scheme0-' / 'scheme0+'
     const schemeMatch = /^scheme(\d)([-+])$/.exec(b.act);
     if (schemeMatch) {
@@ -792,13 +802,16 @@ export function drawPause(): void {
 export function handlePauseClick(): void {
   for (const b of hits) {
     if (!pointIn(mouse.x, mouse.y, b.x, b.y, b.w, b.h)) continue;
-    audio.tick();
+    audio.uiClick();
     switch (b.act) {
       case 'resume':
         game.paused = false;
+        audio.pauseClose();
+        audio.setPauseDuck(false);
         break;
       case 'restart':
         game.paused = false;
+        audio.setPauseDuck(false);
         startMatch();
         break;
       case 'quit':
@@ -806,6 +819,8 @@ export function handlePauseClick(): void {
         game.state = 'menu';
         game.menuPage = 'title';
         game.matchWinner = null;
+        audio.setPauseDuck(false);
+        audio.music('menu');
         break;
       case 'sound':
         audio.toggleMute();
@@ -993,13 +1008,14 @@ export function drawMatchOver(): void {
 export function handleMatchOverClick(): void {
   for (const b of hits) {
     if (!pointIn(mouse.x, mouse.y, b.x, b.y, b.w, b.h)) continue;
-    audio.tick();
+    audio.uiClick();
     if (b.act === 'rematch') {
       startMatch();
     } else if (b.act === 'menu') {
       game.state = 'menu';
       game.menuPage = 'title';
       game.matchWinner = null;
+      audio.music('menu');
     }
     return;
   }

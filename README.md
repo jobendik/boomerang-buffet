@@ -4,11 +4,14 @@ An original arena brawler homage to the boomerang party-fighter genre. Cute food
 fighters fling returning boomerangs that bounce off walls and slice opponents.
 Grab power-ups, dash, and parry — last snack standing wins the round.
 
-Built with **Vite** + **TypeScript** + Canvas 2D. No game-art or audio assets:
-every fighter is procedural vector art, every arena is painted by a
-biome-themed renderer, every icon is hand-drawn vector geometry, and every
-sound is a tiny WebAudio synth. The only binary assets are the two bundled
-typefaces (Lilita One & Nunito, via `@fontsource`).
+Built with **Vite** + **TypeScript** + Canvas 2D. No game-art assets: every
+fighter is procedural vector art, every arena is painted by a biome-themed
+renderer, and every icon is hand-drawn vector geometry. Audio is a real
+sample-based mix — ~70 curated royalty-free sounds plus three music beds
+(see `AUDIO_CREDITS.md`), bundled as small MP3s and driven by a WebAudio
+engine with round-robin variations, pitch jitter, retrigger gating, voice
+caps and a paused-game "underwater" music duck. The other binary assets are
+the two bundled typefaces (Lilita One & Nunito, via `@fontsource`).
 
 ## Getting started
 
@@ -156,7 +159,7 @@ src/
 ├─ core/              # engine plumbing
 │  ├─ canvas.ts       # shared HiDPI canvas + 2D context + offscreen layers
 │  ├─ math.ts         # vector & number helpers
-│  ├─ audio.ts        # procedural WebAudio synth
+│  ├─ audio.ts        # sample-based WebAudio engine (SFX buses + music beds)
 │  └─ input.ts        # keyboard / mouse / touch
 │
 ├─ data/              # static, declarative game data

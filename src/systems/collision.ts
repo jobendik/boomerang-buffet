@@ -65,6 +65,7 @@ export function resolveGates(o: { x: number; y: number; r: number }): void {
  */
 export function updateSwitches(): void {
   if (!game.switches.length) return;
+  const prevOpen = game.gates.map((g) => g.open);
   for (const g of game.gates) g.open = false;
   for (const s of game.switches) {
     const now: number[] = [];
@@ -78,7 +79,7 @@ export function updateSwitches(): void {
         const p = game.players.find((q) => q.idx === idx);
         if (p) {
           p.stats.switches++;
-          audio.tick();
+          audio.switch_();
           spawnRing(s.x, s.y, '#ffce54', 0.9);
         }
       }
@@ -87,6 +88,8 @@ export function updateSwitches(): void {
     s.pressed = now.length > 0;
     if (s.pressed && game.gates[s.gate]) game.gates[s.gate].open = true;
   }
+  // a stone-on-stone rumble whenever any gate actually changes state
+  if (game.gates.some((g, i) => g.open !== prevOpen[i])) audio.gate();
 }
 
 /**
@@ -166,7 +169,7 @@ export function resolvePortals(e: { x: number; y: number; vx: number; vy: number
     e.y = ey + ny * (P.r + 6);
     e.portalCd = 0.4;
     spawnRing(e.x, e.y, '#8affd6', 0.9);
-    audio.dash();
+    audio.portal();
     return;
   }
 }
@@ -265,7 +268,7 @@ export function resolveDecoyHits(): void {
     }
     if (d.life <= 0) {
       spawnRing(d.x, d.y, POWERS.DECOY.color, 1.1);
-      audio.tick();
+      audio.pop();
       continue;
     }
     // an enemy melee swing connecting with the clone also bursts it
@@ -278,7 +281,7 @@ export function resolveDecoyHits(): void {
         if (angDiff(a, Math.atan2(d.y - p.y, d.x - p.x)) < SLASH_HALF) {
           d.life = 0;
           spawnRing(d.x, d.y, POWERS.DECOY.color, 1.1);
-          audio.tick();
+          audio.pop();
           break;
         }
       }

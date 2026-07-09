@@ -95,6 +95,8 @@ export function startRound(): void {
   game.pickupTimer = 3.5;
   game.state = 'countdown';
   game.countdownT = 2.2;
+  audio.music('game');
+  audio.respawn(); // the whole roster popping back onto the field
 }
 
 /**
@@ -172,7 +174,7 @@ export function endRoundCheck(): void {
     }
     game.state = 'roundover';
     game.roundoverT = 2.0;
-    audio.win();
+    audio.roundWin();
     const champ = game.players.find((p) => p.score >= game.target);
     if (champ) game.matchWinner = champ;
     return;
@@ -186,7 +188,7 @@ export function endRoundCheck(): void {
       for (const p of alive) p.score++; // whole surviving squad scores
       game.state = 'roundover';
       game.roundoverT = 2.0;
-      if (game.roundWinner) audio.win();
+      if (game.roundWinner) audio.roundWin();
       const champ = game.players.find((p) => p.score >= game.target);
       if (champ) game.matchWinner = champ;
     }
@@ -199,7 +201,7 @@ export function endRoundCheck(): void {
     if (game.roundWinner) game.roundWinner.score++;
     game.state = 'roundover';
     game.roundoverT = 2.0;
-    if (game.roundWinner) audio.win();
+    if (game.roundWinner) audio.roundWin();
     const champ = game.players.find((p) => p.score >= game.target);
     if (champ) game.matchWinner = champ;
   }

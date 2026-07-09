@@ -223,7 +223,7 @@ export class Boomerang {
           new Particle(this.x, this.y, rand(-150, 150), rand(-150, 150), rand(0.12, 0.26), Math.random() < 0.5 ? '#fff' : this.origOwner.char.body, rand(1.5, 3))
         );
       }
-      if (Math.random() < 0.5) audio.tick();
+      audio.bounce(); // ricochet knock (the engine's retrigger gap tames barrages)
     }
 
     // teleporters carry boomerangs through too (velocity preserved)
@@ -268,7 +268,7 @@ export class Boomerang {
       ex.unstoppable = this.unstoppable; // an un-parryable fan stays un-parryable
       game.boomerangs.push(ex);
     }
-    audio.throw_();
+    audio.throw_(0.3);
     this.kill(true);
   }
 

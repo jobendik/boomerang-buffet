@@ -280,7 +280,7 @@ export class Player {
       const cy = clamp(this.y, BOUNDS.t + 90, BOUNDS.b - 90);
       game.br = { cx, cy, r: 1300, rStart: 1300, rMin: 118, initiator: this, t: 0, shrink: 8.5, dur: 13 };
       spawnRing(cx, cy, POWERS.BATTLE.color, 2.2);
-      audio.power();
+      audio.sudden(); // the ring closing in is a threat, not a treat
       return;
     }
     // Honour mutually-exclusive groups (Fire/Ice, Hot Feet/Cool Walk): taking
@@ -299,7 +299,7 @@ export class Player {
    *  unattended, becomes lethal. Dashing (see `update`) stamps it out. */
   ignite(source: Player | null): void {
     if (!this.alive || this.invuln > 0) return;
-    if (this.burning <= 0) audio.tick();
+    if (this.burning <= 0) audio.ignite();
     this.burning = Math.max(this.burning, 1.7);
     this.burnSource = source && source.alive ? source : this.burnSource;
   }
@@ -335,6 +335,7 @@ export class Player {
         this.jumpZ = 0;
         this.invuln = Math.max(this.invuln, 0.12); // brief landing grace
         this.squashT = 0.18; // touchdown squash
+        audio.land();
         spawnDashPuff(this.x, this.y, this.aim, this.char.body); // touchdown puff
       }
     }
@@ -452,13 +453,14 @@ export class Player {
     this.dustT -= dt;
     if (runSpeed > 170 && !this.airborne && this.dashT <= 0 && this.dustT <= 0) {
       this.dustT = 0.16;
+      audio.step();
       spawnFootDust(this.x, this.y + this.r * 0.8);
     }
 
     // frozen fighters mash dash to crack the ice apart and break free early
     if (frozen && intents.dash) {
       this.frozen = Math.max(0, this.frozen - 0.32);
-      if (Math.random() < 0.4) audio.tick();
+      if (Math.random() < 0.4) audio.crack();
       if (this.frozen <= 0) spawnRing(this.x, this.y, '#bdf0ff', 1.0);
     }
 
@@ -511,7 +513,7 @@ export class Player {
         this.invuln = Math.max(this.invuln, 0.1);
         spawnDashPuff(this.x, this.y, this.aim, POWERS.STAB.color);
       }
-      audio.dash();
+      audio.slash();
     }
 
     // HOT FEET / COOL WALK: lay an elemental trail while moving at speed
@@ -611,7 +613,7 @@ export class Player {
           // fully wound: a quick ping so max charge is felt, not watched for
           if (before < 1 && this.charge >= 1) {
             spawnRing(this.x, this.y, '#ffd23a', 0.7);
-            audio.tick();
+            audio.charge();
           }
         }
         if (!intents.throwHeld && this.charging) {
@@ -689,7 +691,7 @@ export class Player {
     this.invuln = Math.max(this.invuln, 0.2);
     this.dashCd = this.powers.has('SPEED') ? 0.22 : 0.7;
     spawnRing(this.x, this.y, '#8affd6', 1.2);
-    audio.catch_();
+    audio.warp();
     // squash-kill: warping straight onto a foe crushes them flat
     for (const q of game.players) {
       if (!q.alive || q.invuln > 0 || !this.isEnemy(q)) continue;
@@ -757,7 +759,7 @@ export class Player {
     }
     game.boomerangs.push(main);
     this.boomsInHand--;
-    audio.throw_();
+    audio.throw_(charge);
   }
 
   /** Which way a throw banks: strafing sideways relative to your aim carries
@@ -799,30 +801,31 @@ export class Player {
     this.stats.falls++;
     spawnRing(this.x, this.y, '#0b0712', 1.4);
     spawnRing(this.x, this.y, '#6a4f96', 1.0);
-    audio.freeze();
+    audio.fall(); // slide-whistle into the void — no chop, they're simply gone
     // route through die() for the shared bookkeeping (death count, GHOST, etc.).
     // Flagged environmental: a pit ignores DELAYED DEATH (you're simply gone).
-    this.die(null, 0, 0, true, 'GONE!');
+    this.die(null, 0, 0, true, 'GONE!', 'silent');
   }
 
   /** Squished by a kinematic block — an environmental death, no killer. */
   crush(): void {
     if (!this.alive || this.invuln > 0) return;
     game.shake = Math.max(game.shake, 16);
-    this.die(null, 0, -1, true, 'CRUSHED!'); // environmental: Shield still saves, DELAYED doesn't
+    this.die(null, 0, -1, true, 'CRUSHED!', 'crush'); // environmental: Shield still saves, DELAYED doesn't
     if (!this.alive) this.stats.crushDeaths++; // count only an actual squish
   }
 
   /** `environmental` deaths (pits, crushers) bypass the DELAYED DEATH reprieve.
-   *  `pop` overrides the floating word shown at the death site. */
-  die(killer: Player | null, dirx: number, diry: number, environmental = false, pop?: string): void {
+   *  `pop` overrides the floating word shown at the death site; `deathSfx`
+   *  picks the death sound flavour (frozen fighters always shatter). */
+  die(killer: Player | null, dirx: number, diry: number, environmental = false, pop?: string, deathSfx: 'slice' | 'crush' | 'silent' = 'slice'): void {
     if (!this.alive) return;
     // Shield intercepts the next lethal hit instead of dying.
     if (this.powers.has('SHIELD')) {
       this.powers.delete('SHIELD');
       this.invuln = Math.max(this.invuln, 0.6);
       this.shieldFlash = 0.4;
-      audio.parry();
+      audio.shield();
       spawnRing(this.x, this.y, POWERS.SHIELD.color, 1.3);
       return;
     }
@@ -836,7 +839,7 @@ export class Player {
       this.dyingKiller = killer;
       this.dyingDx = dirx;
       this.dyingDy = diry;
-      audio.tick();
+      audio.heartbeat(); // borrowed time starts pounding
       spawnRing(this.x, this.y, POWERS.DELAYED.color, 1.2);
       return;
     }
@@ -865,7 +868,7 @@ export class Player {
         const label = killer.streak === 2 ? 'DOUBLE KILL!' : killer.streak === 3 ? 'TRIPLE KILL!' : 'RAMPAGE!';
         spawnPopText(killer.x, killer.y - killer.r - 14, label, '#ffd23a', 18 + killer.streak * 2);
         spawnConfetti(killer.x, killer.y - 20, 4 + killer.streak * 3);
-        audio.power();
+        audio.streak(killer.streak);
       }
       if (wasFrozen) killer.stats.frozenKills++; // "Ice Breaker"
       if (killer.bamboozled > 0) killer.stats.bamboozledKills++; // "Drunken Master"
@@ -875,7 +878,9 @@ export class Player {
     }
     this.burning = 0;
     this.frozen = 0;
-    audio.slice();
+    if (wasFrozen) audio.shatter();
+    else if (deathSfx === 'crush') audio.crush();
+    else if (deathSfx !== 'silent') audio.slice();
     spawnSlice(this.x, this.y, this.char, dirx, diry);
     spawnPopText(this.x, this.y, pop ?? (wasFrozen ? 'SHATTERED!' : 'SLICED!'), wasFrozen ? '#bdf0ff' : '#fff3df');
     if (wasFrozen) spawnRing(this.x, this.y, '#bdf0ff', 1.3); // the ice block shatters
@@ -888,7 +893,10 @@ export class Player {
     if (game.state === 'playing') {
       game.slowmo = Math.max(game.slowmo, 0.28);
       const left = game.players.filter((q) => q.alive).length;
-      if (left === 1 && game.players.length > 1) game.slowmo = Math.max(game.slowmo, 0.75);
+      if (left === 1 && game.players.length > 1) {
+        game.slowmo = Math.max(game.slowmo, 0.75);
+        audio.bigkill(); // deep sub-drop under the round-deciding slice
+      }
       if (killer && killer.isGoldCarrier) game.slowmo = Math.max(game.slowmo, 0.6);
     }
 
