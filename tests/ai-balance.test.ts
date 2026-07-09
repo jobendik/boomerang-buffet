@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { killConcentration, median, reactiveDodger, runMatch, runSurvival } from './sim';
+import { killConcentration, median, reactiveDodger, runMatch, runRusher, runSpectate, runSurvival } from './sim';
 
 const DIFFS = [0, 1, 2] as const;
 
@@ -53,10 +53,41 @@ describe('lethality', () => {
 
 describe('counterplay', () => {
   it('reactive dodging buys real time against Chill bots', () => {
-    const idle = Array.from({ length: 6 }, () => runSurvival(0).seconds);
-    const dodge = Array.from({ length: 6 }, () => runSurvival(0, reactiveDodger).seconds);
+    const idle = Array.from({ length: 8 }, () => runSurvival(0).seconds);
+    const dodge = Array.from({ length: 8 }, () => runSurvival(0, reactiveDodger).seconds);
     // skilled defence must clearly outlive a statue on the easiest tier
     expect(median(dodge)).toBeGreaterThan(median(idle) * 1.5);
+  });
+
+  it('a committed 1v1 melee rush is a fair duel, not a death sentence', () => {
+    // The complaint this guards: walking up to slice a bot used to be near
+    // guaranteed suicide (close-range snap throws + sub-human melee counters).
+    // Measured duel win rates sit around 95%/55%/65% (Chill/Normal/Spicy);
+    // margins below are generous to absorb the sim's randomness.
+    const WANT: Array<[0 | 1 | 2, number]> = [
+      [0, 4], // Chill: at least 4/8
+      [1, 2], // Normal: at least 2/8
+      [2, 2], // Spicy: at least 2/8
+    ];
+    for (const [d, minWins] of WANT) {
+      const runs = Array.from({ length: 8 }, () => runRusher(d));
+      const wins = runs.filter((r) => r.survived).length;
+      expect(wins, `difficulty ${d}: rusher won only ${wins}/8 duels`).toBeGreaterThanOrEqual(minWins);
+    }
+  });
+});
+
+describe('pacing for the spectating player', () => {
+  it('bots finish the round briskly once the human is out', () => {
+    // Bloodlust (ai.ts) + the doubled sudden-death clock (update.ts) exist so
+    // a dead player never sits through minutes of bots circling each other.
+    for (const d of [1, 2] as const) {
+      const waits = Array.from({ length: 6 }, () => runSpectate(d))
+        .filter((s) => s.humanDied)
+        .map((s) => s.spectateSeconds);
+      expect(waits.length, `difficulty ${d}: idle human survived every probe round`).toBeGreaterThan(0);
+      expect(median(waits), `difficulty ${d}: spectating drags (${waits.map((w) => w.toFixed(1)).join(', ')})`).toBeLessThanOrEqual(15);
+    }
   });
 });
 

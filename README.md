@@ -23,7 +23,9 @@ npm run preview  # preview the production build
 npm run typecheck
 npm test         # headless sim suite: AI balance guardrails + arena integrity
 npm run sim      # print the AI tuning KPI table (round pacing, lethality,
-                 # aggro spread, idle vs dodging survival per difficulty)
+                 # aggro spread, idle vs dodging survival, 1v1 melee-duel
+                 # winrate, post-death spectate time — per difficulty, plus
+                 # a per-arena bot-only pacing probe)
 ```
 
 The test suite runs the **real game loop headlessly** (jsdom + a stubbed
@@ -100,6 +102,16 @@ the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
   error, telegraphed melee windups and dodge latency, all tuned per tier:
   *Chill* is genuinely beatable, *Spicy* earns its name — and never by
   cheating with frame-perfect reads.
+- **Honest close quarters** — bots never release blind point-blank throws:
+  inside 200 px a throw needs real facing, is fumbled a difficulty-scaled
+  share of the time, and costs a longer reset. A bot with an aggressor in its
+  face *commits to the duel* — plants its feet, telegraphs the windup, swings
+  (and can whiff) — so going in for the slice is a fair trade, not suicide.
+  Verified by a scripted 1v1 melee-rusher in the sim suite.
+- **No boring endgames** — once the last human falls, surviving bots get
+  bloodlust (spacing collapses, throws speed up, dodges get sloppy, windups
+  shorten) and the sudden-death clock runs at double speed, so a spectating
+  player watches seconds of finale, not minutes of circling.
 - **Stackable power-ups** — modifiers accumulate and combine, persisting until
   death: `Fire` (sets foes alight — a contagious damage-over-time you can dash
   out of), `Ice` (mutually exclusive with Fire), `Bomb`, `Big`, `Multi` (splits

@@ -22,50 +22,54 @@ interface AITuning {
   dodgeDelay: [number, number]; // reaction latency before the dodge move fires
   parryChance: number; // odds of attempting a slash-parry on a close throw
   meleeWindup: [number, number]; // telegraphed pause before a point-blank slash
+  cqHesitate: number; // odds a close-quarters (<150px) throw is fumbled/delayed
   jumpDodge: boolean; // whether the bot may hop over throws
 }
 
 const TUNING: AITuning[] = [
   {
     // Chill — sluggish reflexes, wobbly aim, generous openings
-    reactTime: [0.45, 0.7],
-    aimJitter: 0.28,
+    reactTime: [0.6, 0.9],
+    aimJitter: 0.38,
     lead: 0,
-    throwCd: [1.5, 2.6],
+    throwCd: [2.1, 3.2],
     throwRange: 400,
     chargeErr: 0.3,
     dodgeChance: 0.25,
     dodgeDelay: [0.22, 0.42],
-    parryChance: 0.12,
-    meleeWindup: [0.3, 0.55],
+    parryChance: 0.08,
+    meleeWindup: [0.45, 0.7],
+    cqHesitate: 0.7,
     jumpDodge: false,
   },
   {
     // Normal — competent but human-ish: readable delays, occasional whiffs
-    reactTime: [0.25, 0.45],
-    aimJitter: 0.13,
-    lead: 0.07,
-    throwCd: [0.9, 1.7],
+    reactTime: [0.32, 0.55],
+    aimJitter: 0.2,
+    lead: 0.05,
+    throwCd: [1.15, 2.0],
     throwRange: 440,
-    chargeErr: 0.18,
+    chargeErr: 0.16,
     dodgeChance: 0.5,
     dodgeDelay: [0.1, 0.24],
-    parryChance: 0.3,
-    meleeWindup: [0.16, 0.32],
+    parryChance: 0.24,
+    meleeWindup: [0.28, 0.46],
+    cqHesitate: 0.55,
     jumpDodge: true,
   },
   {
     // Spicy — sharp but still fallible (never frame-perfect)
     reactTime: [0.12, 0.22],
-    aimJitter: 0.055,
-    lead: 0.12,
-    throwCd: [0.55, 1.15],
+    aimJitter: 0.07,
+    lead: 0.1,
+    throwCd: [0.65, 1.25],
     throwRange: 480,
     chargeErr: 0.1,
     dodgeChance: 0.72,
     dodgeDelay: [0.04, 0.12],
-    parryChance: 0.55,
-    meleeWindup: [0.06, 0.16],
+    parryChance: 0.48,
+    meleeWindup: [0.24, 0.38],
+    cqHesitate: 0.5,
     jumpDodge: true,
   },
 ];
@@ -99,6 +103,14 @@ export function aiThink(p: Player, dt: number): Intents {
   a.tThink -= dt;
   a.tThrow -= dt;
   a.tStrafe -= dt;
+
+  // Aggression escalation. Bots respect their comfy spacing while a human is
+  // in the fight, but once the last human falls (or a round drags on) they
+  // stop dancing: spacing collapses, throws come faster, dodges get sloppier.
+  // This is what keeps the "two bots circling forever" spectacle short.
+  const humansAlive = game.players.some((q) => q.alive && !q.isAI);
+  const stallK = clamp((game.roundT - 24) / 12, 0, 1); // 0 → 1 across 24–36 s
+  const agg = Math.max(humansAlive ? 0 : 0.8, stallK);
 
   // Decision tick: bots only reassess the battlefield every `reactTime`
   // seconds — this is their reaction time. Between ticks they keep tracking
@@ -207,7 +219,7 @@ export function aiThink(p: Player, dt: number): Intents {
     intents.aimX = trueAim[0] * ce - trueAim[1] * se;
     intents.aimY = trueAim[0] * se + trueAim[1] * ce;
 
-    const idealDist = a.range;
+    const idealDist = a.range * (1 - 0.6 * agg); // bloodlust closes the gap
     if (pick && Math.sqrt(pd) < 260 && p.powers.size < 3) {
       const [gx, gy] = norm(pick.x - p.x, pick.y - p.y);
       mvx = gx;
@@ -229,8 +241,14 @@ export function aiThink(p: Player, dt: number): Intents {
     // only against a real foe; a phantom isn't worth a swing. The swing is
     // TELEGRAPHED: entering range arms a windup pause before the blade comes
     // out, so an alert human can dash clear (no more frame-perfect stabs).
-    if (best && !phantom && p.armed && p.slashCd <= 0 && d < p.r + best.r + 30) {
-      if (a.meleeT < 0) a.meleeT = rand(tune.meleeWindup[0], tune.meleeWindup[1]);
+    // The arming range is wider than the blade's reach on purpose: a bot with
+    // an aggressor in its face COMMITS to the duel — plants, winds up, swings
+    // (whiffing if you slipped back out) — instead of backpedal-kiting at
+    // full speed while its friends snipe the chaser. That kite-and-snipe was
+    // the other half of why walking in for a slice felt hopeless.
+    // Bots-only endgames shorten the windup — no human is being tested then.
+    if (best && !phantom && p.armed && p.slashCd <= 0 && d < p.r + best.r + 46) {
+      if (a.meleeT < 0) a.meleeT = rand(tune.meleeWindup[0], tune.meleeWindup[1]) * (humansAlive ? 1 : 1 - 0.4 * agg);
       else {
         a.meleeT -= dt;
         if (a.meleeT <= 0) {
@@ -238,18 +256,33 @@ export function aiThink(p: Player, dt: number): Intents {
           a.meleeT = -1;
         }
       }
+      // planting the feet makes the windup an honest, readable stance: the
+      // cocked-boomerang telegraph plus a full stop says "get out of range"
+      if (a.meleeT > 0) {
+        mvx = 0;
+        mvy = 0;
+      }
     } else {
       a.meleeT = -1; // foe slipped out of range — the windup is wasted
     }
 
-    // throw decision
+    // throw decision. Close quarters are governed separately: the old blind
+    // point-blank release (no facing check inside 200px) was a ~0.2s
+    // unreactable dart — the single biggest reason walking up for a slice
+    // felt like suicide. Now a close throw needs real facing, gets fumbled a
+    // difficulty-scaled share of the time, and costs a longer reset after.
     if (p.hasBoomerang && a.tThrow <= 0 && d < tune.throwRange && !lineHitsObstacle(p.x, p.y, tgX, tgY)) {
       const facing = norm(intents.aimX, intents.aimY);
       const dot = facing[0] * tx + facing[1] * ty;
-      if (dot > 0.6 || d < 200) {
-        intents.throwNow = true;
-        intents.charge = clamp(d / tune.throwRange + rand(-tune.chargeErr, tune.chargeErr), 0.2, 1);
-        a.tThrow = rand(tune.throwCd[0], tune.throwCd[1]);
+      const close = d < 150;
+      if (dot > (d < 200 ? 0.35 : 0.6)) {
+        if (close && Math.random() < tune.cqHesitate * (1 - agg)) {
+          a.tThrow = 0.35; // fumbled under pressure — try again shortly
+        } else {
+          intents.throwNow = true;
+          intents.charge = clamp(d / tune.throwRange + rand(-tune.chargeErr, tune.chargeErr), 0.2, 1);
+          a.tThrow = rand(tune.throwCd[0], tune.throwCd[1]) * (close ? 1.4 : 1) * (1 - 0.5 * agg);
+        }
       }
     }
   } else {
@@ -284,7 +317,7 @@ export function aiThink(p: Player, dt: number): Intents {
     // reaction delay, so a point-blank surprise throw still connects.
     if (danger !== a.dodgeBoom) {
       a.dodgeBoom = danger;
-      a.dodgeActive = Math.random() < tune.dodgeChance;
+      a.dodgeActive = Math.random() < tune.dodgeChance * (1 - 0.45 * agg); // bloodlust trades defence for offence
       a.dodgeDelayT = rand(tune.dodgeDelay[0], tune.dodgeDelay[1]);
       a.parryRoll = Math.random() < tune.parryChance;
     }

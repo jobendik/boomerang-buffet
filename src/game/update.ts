@@ -311,8 +311,11 @@ export function update(dt: number): void {
 
     // Sudden death stall-breaker: long rounds get squeezed by a wall of fire
     // creeping in from the arena borders, forcing the kiters together. Hide &
-    // Seek is exempt (it runs its own hunt clock).
-    game.roundT += dt;
+    // Seek is exempt (it runs its own hunt clock). Once every human is out
+    // the clock runs double — nobody wants to spectate two bots dancing, so
+    // the fire (and the bots' bloodlust ramp, see ai.ts) arrives sooner.
+    const humansAlive = game.players.some((q) => q.alive && !q.isAI);
+    game.roundT += humansAlive ? dt : dt * 2;
     if (game.mode !== 3) {
       const SUDDEN_AT = 45;
       if (!game.hurry && game.roundT >= SUDDEN_AT - 5) {

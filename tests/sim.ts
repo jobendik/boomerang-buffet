@@ -130,6 +130,99 @@ export function circlingEvader(t: number): void {
 }
 
 /**
+ * Scripted proxy modelling the complained-about play: walk straight at the
+ * nearest bot and slash it. Dashes to close the last stretch, holds the slash
+ * key in reach. Measures whether going for the slice is a viable move or a
+ * death sentence.
+ */
+export function meleeRusher(_t: number, players: Player[]): void {
+  const me = players[0];
+  if (!me.alive) {
+    setMoveKeys(0, 0, false);
+    keys['KeyE'] = false;
+    return;
+  }
+  let foe: Player | null = null;
+  let fd = 1e9;
+  for (const q of players) {
+    if (q === me || !q.alive) continue;
+    const d = Math.hypot(q.x - me.x, q.y - me.y);
+    if (d < fd) {
+      fd = d;
+      foe = q;
+    }
+  }
+  if (!foe) {
+    setMoveKeys(0, 0, false);
+    keys['KeyE'] = false;
+    return;
+  }
+  mouse.x = foe.x; // aim straight at the mark
+  mouse.y = foe.y;
+  // the real-player tech: dash carries all the way into contact (i-frames
+  // covering the last, deadliest stretch), slashing the moment the blade
+  // can connect — not a naive stroll through the point-blank zone
+  const dash = fd < 240 && fd > 55 && me.dashCd <= 0 && me.armed;
+  setMoveKeys(foe.x - me.x, foe.y - me.y, dash);
+  keys['KeyE'] = fd < 72 && me.armed;
+}
+
+export interface RusherResult {
+  kills: number; // slices landed by the rusher before the round ended
+  seconds: number; // how long the rusher stayed alive
+  survived: boolean;
+}
+
+/**
+ * One single-round 1v1: the slot-0 proxy melee-rushes a single bot. Isolating
+ * the duel (no teammate crossfire) is what makes this a low-variance read on
+ * "is walking up for the slice a fair play or a death sentence".
+ */
+export function runRusher(difficulty: 0 | 1 | 2, arena = 0): RusherResult {
+  let died = -1;
+  let kills = 0;
+  const stats = runMatch({
+    difficulty,
+    numPlayers: 2,
+    target: 1,
+    arena,
+    allAI: false,
+    maxSimSeconds: 120,
+    perFrame: (t, players) => {
+      if (died < 0 && !players[0].alive) died = t;
+      kills = players[0].stats.kills;
+      meleeRusher(t, players);
+    },
+  });
+  return { kills, seconds: died >= 0 ? died : stats.simSeconds, survived: died < 0 };
+}
+
+export interface SpectateResult {
+  spectateSeconds: number; // human death → round resolution (incl. roundover pause)
+  humanDied: boolean;
+}
+
+/**
+ * The boredom metric: an idle slot-0 human dies early, then we clock how long
+ * the surviving bots take to settle the round while the player just watches.
+ */
+export function runSpectate(difficulty: 0 | 1 | 2, arena = 0): SpectateResult {
+  let died = -1;
+  const stats = runMatch({
+    difficulty,
+    target: 1,
+    arena,
+    allAI: false,
+    maxSimSeconds: 180,
+    perFrame: (t, players) => {
+      if (died < 0 && !players[0].alive) died = t;
+    },
+  });
+  if (died < 0) return { spectateSeconds: 0, humanDied: false };
+  return { spectateSeconds: stats.simSeconds - died, humanDied: true };
+}
+
+/**
  * Scripted proxy modelling a competent human's defence: sidestep
  * perpendicular to incoming boomerangs (dashing through the close ones for
  * i-frames), and kite away from bots that get too close. No offence — it
