@@ -302,6 +302,31 @@ function segmented(x: number, y: number, w: number, h: number, options: string[]
   });
 }
 
+/** Wrap-around option cycler: ◀ [ value ] ▶ across the full width. */
+function cycler(x: number, y: number, w: number, h: number, value: string, act: string): void {
+  const bs = 34;
+  for (const [sym, suffix, bx] of [['◀', '-', x], ['▶', '+', x + w - bs]] as const) {
+    const hov = hot(bx, y, bs, h);
+    ctx.fillStyle = hov ? UI.gold : 'rgba(255,255,255,.14)';
+    roundRectPath(bx, y, bs, h, 9);
+    ctx.fill();
+    ctx.fillStyle = hov ? UI.ink : UI.cream;
+    ctx.font = fontB(14, 900);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sym, bx + bs / 2, y + h / 2 + 1);
+    hits.push({ x: bx, y, w: bs, h, act: act + suffix });
+  }
+  ctx.fillStyle = 'rgba(255,255,255,.1)';
+  roundRectPath(x + bs + 6, y, w - bs * 2 - 12, h, 9);
+  ctx.fill();
+  ctx.fillStyle = UI.gold;
+  ctx.font = fontD(17);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(value, x + w / 2, y + h / 2 + 1);
+}
+
 /** Label + − value + stepper. */
 function stepper(x: number, y: number, w: number, label: string, value: string, act: string): void {
   ctx.fillStyle = UI.dim;
@@ -451,7 +476,9 @@ function drawSetup(): void {
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(13, 900);
   ctx.fillText('ARENA', rx, 204);
-  segmented(rx, 214, rw, 32, ['Random', ...ARENAS.map((a) => a.name)], game.arenaSel + 1, 'arena');
+  // wrap-around cycler (◀ name ▶) — scales to any number of arenas, unlike
+  // the segmented row it replaced, which ran out of width past five names
+  cycler(rx, 214, rw, 32, game.arenaSel < 0 ? 'Random' : ARENAS[game.arenaSel].name, 'arenaCycle');
   ctx.fillStyle = 'rgba(255,243,223,.6)';
   ctx.font = fontB(12, 700);
   ctx.textAlign = 'left';
@@ -524,7 +551,7 @@ function drawHelp(): void {
   const controls: [string, string][] = [
     ['WASD', 'Move'],
     ['MOUSE', 'Aim'],
-    ['LMB', 'Throw · hold to charge & curve'],
+    ['LMB', 'Throw · charge & strafe to bank'],
     ['RMB / E', 'Slash foes & parry boomerangs'],
     ['SPACE', 'Dash'],
     ['SHIFT / F', 'Hop over danger'],
@@ -693,6 +720,13 @@ export function handleMenuClick(): void {
       case 'arena':
         game.arenaSel = clamp(parseInt(arg, 10) - 1, -1, ARENAS.length - 1);
         break;
+      // the ◀ ▶ cycler wraps through Random (-1) and every arena
+      case 'arenaCycle-':
+        game.arenaSel = game.arenaSel <= -1 ? ARENAS.length - 1 : game.arenaSel - 1;
+        break;
+      case 'arenaCycle+':
+        game.arenaSel = game.arenaSel >= ARENAS.length - 1 ? -1 : game.arenaSel + 1;
+        break;
       case 'diff':
         game.difficulty = clamp(parseInt(arg, 10), 0, 2);
         break;
@@ -792,13 +826,37 @@ export function drawMatchOver(): void {
   if (!w) return;
   const t = game.time;
 
+  // sweeping celebration spotlights behind the podium
+  for (const [ph, col] of [
+    [0, 'rgba(255,210,80,.08)'],
+    [2.4, 'rgba(122,208,255,.06)'],
+  ] as const) {
+    ctx.save();
+    ctx.translate(W / 2, -40);
+    ctx.rotate(Math.sin(t * 0.7 + ph) * 0.55);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-95, H + 60);
+    ctx.lineTo(95, H + 60);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   let title: string;
   if (game.mode === 1) {
     title = w.team === 0 ? 'YOUR TEAM WINS!' : `TEAM ${w.team + 1} WINS!`;
   } else {
     title = w.isAI ? `${w.char.name.toUpperCase()} WINS!` : 'YOU WIN!';
   }
-  titleText(title, W / 2, 92, 54);
+  // the headline breathes with the celebration
+  ctx.save();
+  ctx.translate(W / 2, 92);
+  const pulse = 1 + Math.sin(t * 3.1) * 0.03;
+  ctx.scale(pulse, pulse);
+  titleText(title, 0, 0, 54);
+  ctx.restore();
 
   /* podium: 1st centre, 2nd left, 3rd right */
   const ranked = [...game.players].sort((a, b) => {
@@ -829,15 +887,57 @@ export function drawMatchOver(): void {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(s.rank), s.x, baseY - s.h / 2 + 2);
-    // the fighter, bouncing on their pedestal
-    const bounce = s.rank === 1 ? Math.abs(Math.sin(t * 3.2)) * 10 : Math.sin(t * 2 + s.rank) * 2;
-    const cy = baseY - s.h - 22 * s.scale - bounce;
+    // the fighter on their pedestal — the champ runs a three-move victory
+    // dance loop (pogo hops → 360° spin-jump → boomerang juggle), the
+    // runner-up sways along, and third place slumps in a defeated droop
+    let hop = 0;
+    let rot = 0;
+    let sqx = 1;
+    let sqy = 1;
+    let juggle = false;
+    if (s.rank === 1) {
+      const phase = Math.floor(t / 1.8) % 3;
+      const k = (t % 1.8) / 1.8;
+      if (phase === 0) {
+        // pogo: two springy hops with squash on every landing
+        const h = Math.abs(Math.sin(k * Math.PI * 2));
+        hop = h * 26;
+        sqy = 1 - (1 - h) * 0.14;
+        sqx = 1 + (1 - h) * 0.14;
+      } else if (phase === 1) {
+        // one big leap with a full 360° twirl at the top
+        hop = Math.sin(k * Math.PI) * 36;
+        rot = Math.sin(k * Math.PI - Math.PI / 2) * Math.PI + Math.PI; // eased full turn
+        sqy = 1 + Math.sin(k * Math.PI) * 0.08;
+      } else {
+        // juggle: quick little bounces while boomerangs orbit overhead
+        hop = Math.abs(Math.sin(k * Math.PI * 4)) * 8;
+        juggle = true;
+      }
+    } else if (s.rank === 2) {
+      hop = Math.max(0, Math.sin(t * 2.4)) * 5; // polite golf-clap sway
+      rot = Math.sin(t * 2.4) * 0.08;
+    } else {
+      sqy = 0.92; // third place droops, deflated
+      sqx = 1.05;
+      hop = Math.sin(t * 1.1) * 1.5 - 2;
+      rot = Math.sin(t * 0.9) * 0.05;
+    }
+    const cy = baseY - s.h - 22 * s.scale - hop;
     ctx.save();
     ctx.translate(s.x, cy);
-    ctx.scale(s.scale, s.scale);
-    s.p!.char.draw(s.p!.char, 18, [0, 0.25]);
+    ctx.rotate(rot);
+    ctx.scale(s.scale * sqx, s.scale * sqy);
+    s.p!.char.draw(s.p!.char, 18, s.rank === 3 ? [0, 0.55] : [0, 0.25]);
     ctx.restore();
     if (s.rank === 1) drawCrown(s.x, cy - 30 * s.scale, 16);
+    if (juggle) {
+      // two boomerangs looping above the champ's head
+      for (const off of [0, Math.PI]) {
+        const ja = t * 6 + off;
+        drawBoomShape(s.x + Math.cos(ja) * 30, cy - 34 * s.scale + Math.sin(ja) * 12, 9, t * 12 + off, s.p!.char.dark);
+      }
+    }
     // name + score
     ctx.font = fontB(13, 900);
     ctx.fillStyle = s.p!.isAI ? UI.cream : UI.gold;

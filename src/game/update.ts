@@ -1,10 +1,10 @@
 import { audio } from '../core/audio';
-import { W } from '../constants';
+import { BOUNDS, W } from '../constants';
 import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse, readGamepad } from '../core/input';
 import { aiThink } from '../systems/ai';
 import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
-import { spawnConfetti, spawnRing } from '../systems/effects';
+import { spawnConfetti, spawnPopText, spawnRing } from '../systems/effects';
 import { POWERS } from '../data/powers';
 import { Particle } from '../entities/Particle';
 import { game } from './state';
@@ -106,6 +106,39 @@ function mouseIntents(p: Player): Intents {
   };
 }
 
+/**
+ * Soft aim assist for humans on 8-way keys or a stick: if an enemy sits within
+ * a narrow cone of where they're pointing, bend the aim toward that foe. Mouse
+ * players aim pixel-perfect already, so only the coarse devices get the help —
+ * it keeps keyboard/gamepad throws competitive without ever aiming for you.
+ */
+function assistAim(p: Player, aim: Vec2): Vec2 {
+  let best: Vec2 | null = null;
+  let bestDot = 0.92; // ≈ ±23° cone — outside it, your aim is your aim
+  const consider = (x: number, y: number): void => {
+    const d = dist(p.x, p.y, x, y);
+    if (d > 520 || d < 1) return;
+    const dir = norm(x - p.x, y - p.y);
+    const dot = dir[0] * aim[0] + dir[1] * aim[1];
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = [x, y];
+    }
+  };
+  for (const q of game.players) {
+    if (q.alive && !q.disguised && p.isEnemy(q)) consider(q.x, q.y);
+  }
+  // enemy DECOY clones magnetize too — the assist must be as gullible as the
+  // eye, or assisted players would get free decoy-detection
+  for (const d of game.decoys) {
+    if (d.ownerIdx === p.idx || (p.team >= 0 && d.team >= 0 && p.team === d.team)) continue;
+    consider(d.x, d.y);
+  }
+  if (!best) return aim;
+  const dir = norm(best[0] - p.x, best[1] - p.y);
+  return norm(lerp(aim[0], dir[0], 0.65), lerp(aim[1], dir[1], 0.65));
+}
+
 interface KeyScheme {
   up: string;
   down: string;
@@ -133,7 +166,7 @@ function keyboardIntents(p: Player, s: KeyScheme): Intents {
   if (keys[s.down]) my += 1;
   if (keys[s.left]) mx -= 1;
   if (keys[s.right]) mx += 1;
-  const aim: Vec2 = mx || my ? norm(mx, my) : p.aim;
+  const aim: Vec2 = assistAim(p, mx || my ? norm(mx, my) : p.aim);
   return {
     move: [mx, my],
     aimX: aim[0],
@@ -153,7 +186,7 @@ function gamepadIntents(p: Player, padIndex: number): Intents {
   const pad = readGamepad(padIndex);
   if (!pad) return { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
   const [mx, my] = pad.move;
-  const aim: Vec2 = pad.aim ? norm(pad.aim[0], pad.aim[1]) : mx || my ? norm(mx, my) : p.aim;
+  const aim: Vec2 = assistAim(p, pad.aim ? norm(pad.aim[0], pad.aim[1]) : mx || my ? norm(mx, my) : p.aim);
   return {
     move: [mx, my],
     aimX: aim[0],
@@ -196,6 +229,7 @@ export function update(dt: number): void {
   }
   game.time += dt;
   game.shake = Math.max(0, game.shake - dt * 40);
+  game.flash = Math.max(0, game.flash - dt);
   if (game.fightT > 0) game.fightT = Math.max(0, game.fightT - raw);
 
   // age the power-pickup toasts & floor decals
@@ -208,6 +242,29 @@ export function update(dt: number): void {
   if (game.state === 'matchover') {
     // confetti drifts over the podium for as long as the screen is up
     if (Math.random() < 0.2) spawnConfetti(rand(W * 0.1, W * 0.9), -14, 2);
+    // fireworks pop in the sky above the podium…
+    if (Math.random() < 0.022) {
+      const fx = rand(W * 0.15, W * 0.85);
+      const fy = rand(60, 210);
+      const col = ['#ff5d6c', '#ffce54', '#7ad06d', '#7ad0ff', '#ff7ad0', '#c08bff'][Math.floor(rand(0, 6))];
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * TAU + rand(-0.1, 0.1);
+        const sp = rand(90, 220);
+        game.particles.push(new Particle(fx, fy, Math.cos(a) * sp, Math.sin(a) * sp, rand(0.5, 0.9), col, rand(2, 4)));
+      }
+      spawnRing(fx, fy, col, 1.4);
+    }
+    // …and confetti cannons volley up from the podium's flanks
+    if (Math.random() < 0.014) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      for (let i = 0; i < 10; i++) {
+        const cols = ['#ff5d6c', '#ffce54', '#7ad06d', '#7ad0ff', '#ff7ad0', '#c08bff'];
+        game.particles.push(
+          new Particle(W / 2 + side * 110 + rand(-8, 8), 330, side * rand(-30, 90), rand(-360, -220), rand(1.8, 2.8), cols[i % cols.length], rand(5, 9), 'confetti')
+        );
+      }
+      audio.tick();
+    }
     game.particles = game.particles.filter((p) => p.update(dt));
     return;
   }
@@ -241,6 +298,51 @@ export function update(dt: number): void {
           game.pickupTimer = rand(5, 8.5);
         } else {
           game.pickupTimer = rand(2, 3.5); // leader heavily buffed — retry sooner, spawn less
+        }
+      }
+    }
+
+    // Sudden death stall-breaker: long rounds get squeezed by a wall of fire
+    // creeping in from the arena borders, forcing the kiters together. Hide &
+    // Seek is exempt (it runs its own hunt clock).
+    game.roundT += dt;
+    if (game.mode !== 3) {
+      const SUDDEN_AT = 45;
+      if (!game.hurry && game.roundT >= SUDDEN_AT - 5) {
+        game.hurry = true;
+        spawnPopText(W / 2, 130, 'HURRY UP!', '#ffce54', 24);
+        audio.tick();
+      }
+      if (!game.sudden && game.roundT >= SUDDEN_AT) {
+        game.sudden = true;
+        game.raining = false; // the closing inferno dries the rain right up
+        spawnPopText(W / 2, 130, 'SUDDEN DEATH!', '#ff5d6c', 30);
+        audio.power();
+        game.shake = Math.max(game.shake, 8);
+      }
+      if (game.sudden) {
+        game.suddenEnc = Math.min(8 + (game.roundT - SUDDEN_AT) * 9, 200);
+        const e = game.suddenEnc;
+        for (const p of game.players) {
+          if (!p.alive) continue;
+          if (p.x < BOUNDS.l + e || p.x > BOUNDS.r - e || p.y < BOUNDS.t + e || p.y > BOUNDS.b - e) p.ignite(null);
+        }
+        // embers drifting off the advancing fire line
+        if (Math.random() < 0.6) {
+          const l = BOUNDS.l + e;
+          const r = BOUNDS.r - e;
+          const t = BOUNDS.t + e;
+          const b = BOUNDS.b - e;
+          let ex: number;
+          let ey: number;
+          if (Math.random() < 0.5) {
+            ex = rand(l, r);
+            ey = Math.random() < 0.5 ? t : b;
+          } else {
+            ex = Math.random() < 0.5 ? l : r;
+            ey = rand(t, b);
+          }
+          game.particles.push(new Particle(ex, ey, rand(-14, 14), rand(-42, -10), rand(0.3, 0.6), Math.random() < 0.5 ? '#ff7b3a' : '#ffce54', rand(2, 4)));
         }
       }
     }

@@ -7,7 +7,7 @@ import { arena, OBSTACLES, SPAWNS } from '../data/arena';
 import { POWERS, EXCLUSIVE_GROUPS, type PowerKey } from '../data/powers';
 import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
 import { circleRect, resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
-import { spawnDashPuff, spawnExplosion, spawnFootDust, spawnPopText, spawnRing, spawnSlice } from '../systems/effects';
+import { spawnConfetti, spawnDashPuff, spawnExplosion, spawnFootDust, spawnPopText, spawnRing, spawnSlice } from '../systems/effects';
 import { game } from '../game/state';
 import { Boomerang } from './Boomerang';
 import { Particle } from './Particle';
@@ -20,15 +20,16 @@ const SLASH_ACTIVE = 0.12; // seconds the blade is "live"
 const SLASH_CD = 0.42; // base melee cooldown
 const SLASH_CD_FAST = 0.24; // with EXTRA (dual-wield)
 const MAX_CURVE = 1.8; // rad/s angular velocity at full charge
-const BASE_CURVE = 0.5; // rad/s baseline bank on even an uncharged throw — every
+const BASE_CURVE = 0.35; // rad/s baseline bank on even an uncharged throw — every
 //                          flight arcs out and loops back, the boomerang's signature
-const RESPAWN_TIME = 1.2; // delay before a lost boomerang returns to hand
+//                          (kept gentle so quick flicks fly true where you aim)
+const RESPAWN_TIME = 0.9; // delay before a lost boomerang returns to hand
 const JUMP_TIME = 0.5; // seconds airborne per hop
 const JUMP_H = 30; // peak visual height of a hop
 const JUMP_CD = 0.85; // hop cooldown
 
 interface AIState {
-  tThink: number;
+  tThink: number; // countdown to the next decision refresh (the bot's "reaction time")
   target: Player | null;
   strafe: number;
   tStrafe: number;
@@ -37,6 +38,11 @@ interface AIState {
   goPower: PowerKey | null;
   dodgeBoom: Boomerang | null; // the incoming throw we last reacted to
   dodgeActive: boolean; // whether we committed to actively dodging dodgeBoom
+  dodgeDelayT: number; // reaction latency left before a committed dodge fires
+  parryRoll: boolean; // pre-rolled: will we try to slash-parry dodgeBoom?
+  aimErr: number; // current aim error (radians), resampled each decision tick
+  meleeT: number; // point-blank slash windup countdown (-1 = not armed)
+  range: number; // preferred fighting distance — per-bot personality
 }
 
 interface PlayerStats {
@@ -111,6 +117,10 @@ export class Player {
   shieldFlash!: number;
   moveK!: number; // 0 idle … 1 running, smoothed (drives the walk wobble)
   dustT!: number; // footstep dust cadence
+  ghostT!: number; // dash afterimage cadence
+  streak!: number; // kills chained inside the streak window
+  streakT!: number; // remaining streak window
+  swingDir!: number; // which way the next melee swing sweeps (alternates)
   squashT!: number; // landing/dash squash timer (visual)
   disguised!: boolean; // DISGUISE: held still long enough to look like scenery
   disguiseT!: number; // seconds of stillness accumulated toward disguising
@@ -163,6 +173,11 @@ export class Player {
       goPower: null,
       dodgeBoom: null,
       dodgeActive: false,
+      dodgeDelayT: 0,
+      parryRoll: false,
+      aimErr: 0,
+      meleeT: -1,
+      range: rand(205, 285), // each bot prefers its own spacing — varied personalities
     };
   }
 
@@ -199,6 +214,10 @@ export class Player {
     this.shieldFlash = 0;
     this.moveK = 0;
     this.dustT = 0;
+    this.ghostT = 0;
+    this.streak = 0;
+    this.streakT = 0;
+    this.swingDir = 1;
     this.squashT = 0;
     this.disguised = false;
     this.disguiseT = 0;
@@ -299,6 +318,10 @@ export class Player {
     if (this.slashT > 0) this.slashT = Math.max(0, this.slashT - dt);
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
     if (this.frozen > 0) this.frozen = Math.max(0, this.frozen - dt);
+    if (this.streakT > 0) {
+      this.streakT -= dt;
+      if (this.streakT <= 0) this.streak = 0;
+    }
 
     // JUMP / vertical dodge: while airborne, rise on a parabolic arc and stay
     // untouchable (we top up invuln, so every existing damage guard skips us —
@@ -479,6 +502,7 @@ export class Player {
       if (this.isSeeker) this.attemptsLeft--;
       this.slashT = SLASH_ACTIVE;
       this.slashCd = this.powers.has('EXTRA') ? SLASH_CD_FAST : SLASH_CD;
+      this.swingDir = -this.swingDir; // alternate forehand/backhand swings
       // STAB lunges the fighter forward on the swing — an aggressive gap-closer.
       if (this.powers.has('STAB')) {
         this.vx = this.aim[0] * 560;
@@ -500,10 +524,20 @@ export class Player {
       }
     }
 
-    // friction during dash decay
+    // friction during dash decay + a trail of translucent afterimages
     if (this.dashT > 0) {
       this.vx *= Math.pow(0.02, dt);
       this.vy *= Math.pow(0.02, dt);
+      this.ghostT -= dt;
+      if (this.ghostT <= 0) {
+        this.ghostT = 0.045;
+        const g = new Particle(this.x, this.y, 0, 0, 0.26, this.char.body, this.r, 'ghost');
+        g.char = this.char;
+        g.aimV = [this.aim[0], this.aim[1]];
+        game.particles.push(g);
+      }
+    } else {
+      this.ghostT = 0;
     }
 
     // integrate (axis-separated so we slide along walls instead of snagging)
@@ -572,7 +606,13 @@ export class Player {
       } else {
         if (intents.throwHeld && this.armed) {
           this.charging = true;
+          const before = this.charge;
           this.charge = clamp(this.charge + dt / 0.55, 0, 1);
+          // fully wound: a quick ping so max charge is felt, not watched for
+          if (before < 1 && this.charge >= 1) {
+            spawnRing(this.x, this.y, '#ffd23a', 0.7);
+            audio.tick();
+          }
         }
         if (!intents.throwHeld && this.charging) {
           // release
@@ -697,7 +737,8 @@ export class Player {
     const speed = 430 + charge * 230;
     // WEAK ARM (anti-power): the boomerang turns back at half the usual range.
     const outTime = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
-    const curve = BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE); // longer hold => tighter loop
+    // longer hold => tighter loop; sideways momentum picks which way it banks
+    const curve = (BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE)) * this.curveSide();
     const main = new Boomerang(this, ax * speed, ay * speed, outTime, true);
     main.curve = curve;
     // The Golden Boomerang carrier's modifiers are suspended — a plain throw only.
@@ -719,6 +760,14 @@ export class Player {
     audio.throw_();
   }
 
+  /** Which way a throw banks: strafing sideways relative to your aim carries
+   *  that momentum into the curve (move left of aim → bank left), so the arc
+   *  is player-steerable. Standing still keeps the classic clockwise loop. */
+  private curveSide(): number {
+    const cross = this.aim[0] * this.vy - this.aim[1] * this.vx;
+    return Math.hypot(this.vx, this.vy) > 40 && Math.abs(cross) > 30 ? Math.sign(cross) : 1;
+  }
+
   /** A boomerang of ours left play uncaught — schedule its return to hand. */
   loseBoomerang(): void {
     this.respawns.push(RESPAWN_TIME);
@@ -729,6 +778,7 @@ export class Player {
     audio.catch_();
     spawnRing(this.x, this.y, this.char.body, 0.9);
     game.shake = Math.max(game.shake, 3); // a satisfying little thunk on the catch
+    this.squashT = 0.15; // the body absorbs the snag with a quick squash
   }
 
   freeze(): void {
@@ -808,6 +858,15 @@ export class Player {
     this.stats.deaths++;
     if (killer && killer !== this) {
       killer.stats.kills++;
+      // kill-streak fanfare: kills chained inside the window escalate the pop
+      killer.streak = killer.streakT > 0 ? killer.streak + 1 : 1;
+      killer.streakT = 2.2;
+      if (killer.alive && killer.streak >= 2) {
+        const label = killer.streak === 2 ? 'DOUBLE KILL!' : killer.streak === 3 ? 'TRIPLE KILL!' : 'RAMPAGE!';
+        spawnPopText(killer.x, killer.y - killer.r - 14, label, '#ffd23a', 18 + killer.streak * 2);
+        spawnConfetti(killer.x, killer.y - 20, 4 + killer.streak * 3);
+        audio.power();
+      }
       if (wasFrozen) killer.stats.frozenKills++; // "Ice Breaker"
       if (killer.bamboozled > 0) killer.stats.bamboozledKills++; // "Drunken Master"
       // a kill landed by a dead fighter (their boomerang/bomb/Last Laugh blast
@@ -823,9 +882,11 @@ export class Player {
     game.shake = Math.max(game.shake, 14);
     game.hitstop = Math.max(game.hitstop, 0.09);
 
-    // cinematic beats: a brief slow-mo when a kill decides the round, or when
-    // the Golden Boomerang carrier scores one (the blueprint's time-dilation)
+    // cinematic beats: EVERY slice gets a micro slow-mo so the two halves are
+    // seen tumbling apart; a round-deciding kill or a Golden-carrier kill
+    // stretches the moment further (the blueprint's time-dilation)
     if (game.state === 'playing') {
+      game.slowmo = Math.max(game.slowmo, 0.28);
       const left = game.players.filter((q) => q.alive).length;
       if (left === 1 && game.players.length > 1) game.slowmo = Math.max(game.slowmo, 0.75);
       if (killer && killer.isGoldCarrier) game.slowmo = Math.max(game.slowmo, 0.6);
@@ -888,6 +949,16 @@ export class Player {
     ctx.rotate(Math.sin(this.bob * 1.35) * 0.055 * this.moveK);
     ctx.scale(popScale * (1 + sq * 0.16), popScale * (1 - sq * 0.18));
 
+    // wind-up body language: lean back while charging a throw, and tremble
+    // with barely-contained power once the charge is full
+    if (this.charging && this.charge > 0.1) {
+      ctx.translate(-this.aim[0] * this.charge * 3, -this.aim[1] * this.charge * 3);
+      ctx.rotate(-this.aim[0] * this.charge * 0.06);
+      if (this.charge >= 1) ctx.translate(rand(-0.8, 0.8), rand(-0.8, 0.8));
+    }
+    // frozen solid: shivering inside the ice block
+    if (this.frozen > 0) ctx.translate(Math.sin(game.time * 38) * 1.1, 0);
+
     // stacked power auras (one faint ring per active modifier)
     let ringIdx = 0;
     for (const key of this.powers) {
@@ -920,19 +991,32 @@ export class Player {
 
     this.char.draw(this.char, this.r, this.aim);
 
-    // slash arc swoosh
+    // melee swing: the boomerang itself sweeps across the slash arc like a
+    // knife — wind-up edge to follow-through — trailing a fading swoosh
     if (this.slashT > 0) {
       const a = Math.atan2(this.aim[1], this.aim[0]);
-      const k = this.slashT / SLASH_ACTIVE;
-      ctx.strokeStyle = `rgba(255,255,255,${0.85 * k})`;
-      ctx.lineWidth = 5;
+      const k = 1 - this.slashT / SLASH_ACTIVE; // 0 wind-up → 1 follow-through
+      const fade = this.slashT / SLASH_ACTIVE;
+      const sweep = SLASH_HALF * 1.5;
+      const start = a - this.swingDir * sweep;
+      const blade = start + this.swingDir * sweep * 2 * k; // blade's current angle
+      const rad = this.r + SLASH_RANGE * 0.7;
+      ctx.save();
       ctx.lineCap = 'round';
+      // the swoosh swept out so far, brightest along the blade's wake
+      ctx.strokeStyle = `rgba(255,255,255,${0.8 * fade})`;
+      ctx.lineWidth = 6;
       ctx.beginPath();
-      ctx.arc(0, 0, this.r + SLASH_RANGE * 0.7, a - SLASH_HALF, a + SLASH_HALF);
+      ctx.arc(0, 0, rad, start, blade, this.swingDir < 0);
       ctx.stroke();
-      ctx.strokeStyle = `rgba(180,240,255,${0.5 * k})`;
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = `rgba(180,240,255,${0.45 * fade})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, rad + 4, start, blade, this.swingDir < 0);
       ctx.stroke();
+      // the blade: our own boomerang, spinning hard as it's swung through
+      drawBoomShape(Math.cos(blade) * rad, Math.sin(blade) * rad, 10, blade + k * 9, this.char.dark);
+      ctx.restore();
     }
     // burning glow (the fiery particles themselves come from update())
     if (this.burning > 0) {
@@ -986,15 +1070,27 @@ export class Player {
     }
     ctx.restore();
 
-    // boomerang-in-hand indicators + charge arc (ride up with the hop)
+    // boomerang-in-hand indicators + charge arc (ride up with the hop).
+    // While slashing, one boomerang is busy being swung — don't double-draw it.
     if (this.boomsInHand > 0) {
       const hbY = this.y + bobY - this.jumpZ;
       const a = Math.atan2(this.aim[1], this.aim[0]);
-      for (let i = 0; i < this.boomsInHand; i++) {
-        const off = (i - (this.boomsInHand - 1) / 2) * 0.5;
+      const shown = this.slashT > 0 ? this.boomsInHand - 1 : this.boomsInHand;
+      // melee-windup telegraph: a bot about to swing cocks its boomerang high
+      // behind its shoulder, spinning fast and flashing white — the readable
+      // "get out of the way" cue that makes the windup mechanic fair
+      const windup = this.isAI && this.ai.meleeT > 0 && this.slashT <= 0;
+      for (let i = windup ? 1 : 0; i < shown; i++) {
+        const off = (i - (shown - 1) / 2) * 0.5;
         const hx = this.x + Math.cos(a + off) * (this.r + 9);
         const hy = hbY + Math.sin(a + off) * (this.r + 9);
         drawBoomShape(hx, hy, 7, game.time * 6, this.char.dark);
+      }
+      if (windup && shown > 0) {
+        const wob = Math.sin(game.time * 24) * 0.12;
+        const wx = this.x + Math.cos(a - 1.15 + wob) * (this.r + 12);
+        const wy = hbY + Math.sin(a - 1.15 + wob) * (this.r + 12);
+        drawBoomShape(wx, wy, 10, game.time * 16, Math.floor(game.time * 16) % 2 ? '#fff' : this.char.dark);
       }
       if (this.charging && this.charge > 0.05) {
         ctx.strokeStyle = `hsl(${lerp(60, 0, this.charge)},100%,60%)`;
@@ -1022,7 +1118,8 @@ export class Player {
     const charge = clamp(this.charge, 0.12, 1);
     const speed = (430 + charge * 230) * (this.powers.has('BIG') ? 0.85 : 1);
     let outT = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
-    const curve = this.powers.has('TELEKINESIS') ? 0 : BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE);
+    // mirror doThrow's bank-side choice so the dots always tell the truth
+    const curve = this.powers.has('TELEKINESIS') ? 0 : (BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE)) * this.curveSide();
     let px = this.x + this.aim[0] * (this.r + 6);
     let py = this.y + this.aim[1] * (this.r + 6);
     let vx = this.aim[0] * speed;

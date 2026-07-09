@@ -132,7 +132,12 @@ export interface GameState {
   shake: number;
   hitstop: number;
   slowmo: number; // remaining real-time seconds of cinematic slow motion
+  flash: number; // remaining life of a full-screen blast flash
   fightT: number; // remaining life of the "FIGHT!" flash after countdown
+  roundT: number; // seconds the current round has been in play
+  hurry: boolean; // the "HURRY UP!" warning has fired this round
+  sudden: boolean; // sudden death active: fire creeps in from the borders
+  suddenEnc: number; // how far (px) the sudden-death fire has encroached
   numPlayers: number;
   /** How many of the fighters are locally controlled humans (1-4). Each
    *  human slot's input device is independently configurable — see
@@ -187,7 +192,12 @@ export const game: GameState = {
   shake: 0,
   hitstop: 0,
   slowmo: 0,
+  flash: 0,
   fightT: 0,
+  roundT: 0,
+  hurry: false,
+  sudden: false,
+  suddenEnc: 0,
   numPlayers: 4,
   numHumans: 1,
   difficulty: 1,

@@ -63,6 +63,11 @@ export function render(): void {
   }
 
   drawWorld();
+  // blink of blast light over the field (HUD stays crisp above it)
+  if (game.flash > 0) {
+    ctx.fillStyle = `rgba(255,240,214,${(game.flash / 0.14) * 0.26})`;
+    ctx.fillRect(0, 0, W, H);
+  }
   drawHUD();
 
   if (game.state === 'countdown') {
@@ -115,6 +120,17 @@ export function render(): void {
   if (game.state === 'roundover') {
     ctx.fillStyle = 'rgba(20,12,28,.5)';
     ctx.fillRect(0, 0, W, H);
+    // the round winner takes a happy bow above the banner
+    if (game.roundWinner) {
+      const rw = game.roundWinner;
+      const hop = Math.abs(Math.sin(game.time * 4.2)) * 14;
+      const land = 1 - Math.abs(Math.sin(game.time * 4.2)); // squash on touchdown
+      ctx.save();
+      ctx.translate(W / 2, H / 2 - 128 - hop);
+      ctx.scale(1.35 * (1 + land * 0.1), 1.35 * (1 - land * 0.1));
+      rw.char.draw(rw.char, 18, [0, 0.3]);
+      ctx.restore();
+    }
     if (game.mode === 3) {
       const seekerWon = !!game.roundWinner && game.roundWinner.role === 'seeker';
       drawCenterText(seekerWon ? 'SEEKER WINS!' : 'HIDERS WIN!', null, seekerWon ? '#ff7ad0' : UI.green);

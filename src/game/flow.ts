@@ -75,8 +75,16 @@ export function startRound(): void {
   game.players.forEach((p, i) => {
     p.reset(SPAWNS[spawnsOrder[i]]);
     p.invuln = 0.8;
+    // opening grace: stagger the bots' first throws (easier tiers wait longer),
+    // so "FIGHT!" isn't answered by an instant synchronized volley
+    p.ai.tThrow = rand(0.5, 1.2) + (2 - game.difficulty) * 0.35;
   });
   game.br = null; // any Battle Royale event ends with the round
+  game.roundT = 0; // fresh clock for the sudden-death stall-breaker
+  game.hurry = false;
+  game.sudden = false;
+  game.suddenEnc = 0;
+  game.flash = 0;
   // Golden Boomerang resets to centre each round; carried time is cumulative
   if (game.mode === 2) {
     game.golden = { x: (BOUNDS.l + BOUNDS.r) / 2, y: (BOUNDS.t + BOUNDS.b) / 2, carrier: null, bob: 0 };

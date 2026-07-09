@@ -18,7 +18,16 @@ npm run dev      # start the dev server (opens the browser)
 npm run build    # type-check + production build into dist/
 npm run preview  # preview the production build
 npm run typecheck
+npm test         # headless sim suite: AI balance guardrails + arena integrity
+npm run sim      # print the AI tuning KPI table (round pacing, lethality,
+                 # aggro spread, idle vs dodging survival per difficulty)
 ```
+
+The test suite runs the **real game loop headlessly** (jsdom + a stubbed
+canvas), fast-forwarding whole bot matches in milliseconds — so AI difficulty
+is tuned against measured numbers (see `tests/sim.ts`), and every arena's
+layout is validated programmatically (spawn clearances, switch/gate wiring,
+and a bots-can-actually-finish-a-match liveness check).
 
 ## Controls
 
@@ -78,7 +87,16 @@ the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
 - **Clash / parry** — a well-timed slash deflects an incoming boomerang straight
   back at its owner.
 - **Charged curve throws** — tap to throw straight; hold to bank the flight path
-  into an arc (max charge nearly orbits).
+  into an arc (max charge nearly orbits). The arc is *steerable*: strafe
+  sideways as you release and the boomerang banks toward the side you're
+  moving — the charging trajectory preview always shows the true path.
+- **Soft aim assist** — keyboard-only and gamepad fighters get a subtle
+  magnetism toward enemies within a narrow cone of their aim (mouse players
+  aim raw), keeping every input device competitive.
+- **Difficulty that means it** — bots have humanlike reaction times, aim
+  error, telegraphed melee windups and dodge latency, all tuned per tier:
+  *Chill* is genuinely beatable, *Spicy* earns its name — and never by
+  cheating with frame-perfect reads.
 - **Stackable power-ups** — modifiers accumulate and combine, persisting until
   death: `Fire` (sets foes alight — a contagious damage-over-time you can dash
   out of), `Ice` (mutually exclusive with Fire), `Bomb`, `Big`, `Multi` (splits
@@ -97,16 +115,28 @@ the match-setup screen) — P1 uses mouse + arrows, P2/P3 are keyboard-only
 - **Game modes** — *Free-for-All*, *Team Up* (two squads, friendly-fire off),
   *Golden Boomerang* (hold the artifact a cumulative N seconds to win — your
   power-ups are suspended while you carry it), and *Hide & Seek*.
-- **Arenas & hazards** — five biome-themed arenas (or random each round):
+- **Arenas & hazards** — eight biome-themed arenas (or random each round):
   bottomless **pits** (dash or hop to leap them), linked **teleporters** that
   preserve momentum, **crusher pistons**, **floor switches** that retract
   colour-matched **gates**, leafy **bushes** for stealth, and the Freezer's
   **slick ice floors** that turn footwork into drifting.
 - **Dynamic economy** — power-book spawn odds decay the more powers the leading
   fighter already holds, to curb snowballing.
-- **Cinematic feel** — slow-motion on round-deciding kills, hitstop, screen
-  shake, kill popups, squash-and-stretch fighters, scorch decals and a charged
-  throw trajectory preview.
+- **Sudden death** — rounds that stall past 45 seconds get a "HURRY UP!"
+  warning, then a wall of fire creeps in from the arena borders until someone
+  settles it (Hide & Seek keeps its own clock).
+- **Cinematic feel** — fighters are *sliced into two tumbling halves* on death
+  (interiors showing), slow-motion on round-deciding kills, hitstop, screen
+  shake, blast screen-flash, dash afterimages, ricochet sparks, kill-streak
+  fanfare (DOUBLE KILL! / TRIPLE KILL! / RAMPAGE!), kill popups,
+  squash-and-stretch fighters, scorch decals, a soft vignette and a charged
+  throw trajectory preview with a max-charge ping. Bots visibly cock their
+  boomerang before a melee swing (the windup telegraph), chargers lean back
+  and tremble at full power, frozen fighters shiver in the ice, round winners
+  take a bow, and the match-over podium is a full celebration — a
+  three-move victory dance (pogo → 360° spin-jump → boomerang juggle) under
+  sweeping spotlights, fireworks and confetti cannons, while third place
+  visibly droops.
 - **Match-end awards** — post-match telemetry hands out comedic awards on a
   podium screen (Fastest Reflexes, Ice Breaker, Pyromaniac, Short Fuse,
   Drunken Master, Slow Learner, …).
@@ -132,7 +162,7 @@ src/
 ├─ data/              # static, declarative game data
 │  ├─ characters.ts   # the twelve food fighters + their vector art
 │  ├─ powers.ts       # power-up definitions (+ one-line descriptions)
-│  └─ arena.ts        # the five arena layouts (geometry, spawns, hazards)
+│  └─ arena.ts        # the eight arena layouts (geometry, spawns, hazards)
 │
 ├─ gfx/
 │  ├─ shapes.ts       # reusable canvas shape helpers
