@@ -4,12 +4,13 @@ import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { BOUNDS } from '../constants';
 import { OBSTACLES } from '../data/arena';
 import { drawBoomShape } from '../gfx/shapes';
-import { circleRect, resolvePortals } from '../systems/collision';
+import { blastKnock, circleRect, resolvePortals, shotTag } from '../systems/collision';
 import { spawnDecal, spawnExplosion, spawnPopText, spawnRing } from '../systems/effects';
 import { game } from '../game/state';
 import { FirePatch } from './FirePatch';
 import { Particle } from './Particle';
 import type { Player } from './Player';
+import type { Rect } from '../types';
 
 /**
  * A thrown boomerang. Flies out (optionally on a charged banking curve),
@@ -45,6 +46,18 @@ export class Boomerang {
   bounceFlash: number;
   portalCd: number;
   trail: number[][]; // recent positions for the motion-blur streak
+  /* how this throw got where it is — feeds the trick-shot callouts */
+  bounces: number; // ricochets on the way out (walls, blocks, bumpers)
+  portals: number; // teleporter hops
+  rally: number; // consecutive parries it has survived (each winds it up faster)
+  clashes: number; // times knocked off line by another boomerang or a blast
+  travel: number; // px flown since launch / last parry
+  bounceAt: number; // `travel` at the last counted ricochet
+  clashAt: number; // `travel` when last knocked off line
+  clashWith: Player | null; // whose boomerang did the knocking
+  clashCd: number; // brief lockout so one mid-air collision resolves once
+  prevOwner: Player | null; // who threw it before the last parry
+  grazed: Set<number>; // fighters it has already whistled past (close-call credit)
 
   constructor(owner: Player, vx: number, vy: number, outTime: number, isMain: boolean) {
     this.owner = owner;
@@ -75,6 +88,24 @@ export class Boomerang {
     this.bounceFlash = 0;
     this.portalCd = 0;
     this.trail = [];
+    this.bounces = 0;
+    this.portals = 0;
+    this.rally = 0;
+    this.clashes = 0;
+    this.travel = 0;
+    this.bounceAt = -999;
+    this.clashAt = 0;
+    this.clashWith = null;
+    this.clashCd = 0;
+    this.prevOwner = null;
+    this.grazed = new Set();
+  }
+
+  /** Record being knocked onto a new heading (by `who`'s boomerang, or a blast). */
+  noteClash(who: Player | null): void {
+    this.clashes++;
+    this.clashAt = this.travel;
+    this.clashWith = who;
   }
 
   get hitR(): number {
@@ -86,7 +117,7 @@ export class Boomerang {
     this.bounceFlash = Math.max(0, this.bounceFlash - dt);
     // record a short position history for the motion-blur streak
     this.trail.push([this.x, this.y]);
-    if (this.trail.length > 7) this.trail.shift();
+    if (this.trail.length > (this.rally > 0 ? 11 : 7)) this.trail.shift();
     if (this.transient) {
       this.life -= dt;
       if (this.life <= 0) {
@@ -161,6 +192,7 @@ export class Boomerang {
     const speedMul = this.big ? 0.85 : 1;
     this.x += this.vx * dt * speedMul;
     this.y += this.vy * dt * speedMul;
+    this.travel += Math.hypot(this.vx, this.vy) * dt * speedMul;
 
     // wall bounce
     let bounced = false;
@@ -195,7 +227,8 @@ export class Boomerang {
       }
     }
     // obstacle bounce (static walls + any closed gates, which are solid too)
-    const solids = game.gates.length ? [...OBSTACLES, ...game.gates.filter((g) => !g.open)] : OBSTACLES;
+    // …and the crusher pistons, which make for moving banks
+    const solids: Rect[] = game.gates.length || game.crushers.length ? [...OBSTACLES, ...game.gates.filter((g) => !g.open), ...game.crushers] : OBSTACLES;
     for (const R of solids) {
       const c = circleRect(this.x, this.y, this.r, R);
       if (c.hit) {
@@ -215,7 +248,51 @@ export class Boomerang {
         }
       }
     }
+    // spring-loaded bumpers: a ricochet that fires the boomerang back out
+    // FASTER than it arrived, with a little extra flight time to use it
+    for (const B of game.bumpers) {
+      const dx = this.x - B.x;
+      const dy = this.y - B.y;
+      const min = B.r + this.r;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= min * min) continue;
+      const d = Math.sqrt(d2) || 0.0001;
+      const nx = dx / d;
+      const ny = dy / d;
+      this.x = B.x + nx * min;
+      this.y = B.y + ny * min;
+      const dot = this.vx * nx + this.vy * ny;
+      if (dot < 0) {
+        this.vx -= 2 * dot * nx;
+        this.vy -= 2 * dot * ny;
+      }
+      const sp = Math.hypot(this.vx, this.vy) || 1;
+      const boost = Math.min(980, sp * 1.14 + 30) / sp;
+      this.vx *= boost;
+      this.vy *= boost;
+      if (this.phase === 'out' && !this.transient) this.outT += 0.14;
+      else if (this.transient) this.life += 0.1;
+      B.flash = 0.3;
+      audio.bumper();
+      spawnRing(B.x, B.y, '#ff7ad0', 0.9);
+      bounced = true;
+      if (this.bomb) {
+        this.explode();
+        return;
+      }
+      if (this.multi && this.phase === 'out' && !this.transient) {
+        this.doSplit();
+        return;
+      }
+    }
     if (bounced) {
+      // only ricochets on the way OUT (or off a parry) are marksmanship — the
+      // homing return rattling round a pillar earns nothing
+      // (and a rattle in a corner is one ricochet, not three)
+      if ((this.phase === 'out' || this.transient) && this.travel - this.bounceAt > 45) {
+        this.bounces++;
+        this.bounceAt = this.travel;
+      }
       this.bounceFlash = 0.12;
       // a little shower of impact sparks at the ricochet point
       for (let i = 0; i < 4; i++) {
@@ -227,7 +304,7 @@ export class Boomerang {
     }
 
     // teleporters carry boomerangs through too (velocity preserved)
-    resolvePortals(this, dt);
+    if (resolvePortals(this, dt)) this.portals++;
 
     // fire trail drops
     if (this.fire) {
@@ -266,6 +343,10 @@ export class Boomerang {
       ex.bomb = this.bomb; // MULTI + BOMB: each splinter carries a scaled-down blast
       ex.blastScale = this.bomb ? 0.62 : 1; // shrunk so the fan can't wipe the map
       ex.unstoppable = this.unstoppable; // an un-parryable fan stays un-parryable
+      ex.bounces = this.bounces; // the fan inherits its parent's flight story
+      ex.portals = this.portals;
+      ex.travel = this.travel;
+      ex.bounceAt = this.bounceAt;
       game.boomerangs.push(ex);
     }
     audio.throw_(0.3);
@@ -288,7 +369,7 @@ export class Boomerang {
       spawnRing(this.x, this.y, '#bdf0ff', 2.0 * this.blastScale);
       spawnDecal(this.x, this.y, R * 0.8, 6, '170,225,250', 0.2); // frost bloom
     }
-    spawnPopText(this.x, this.y, icy ? 'FREEZE!' : 'KABOOM!', icy ? '#bdf0ff' : '#ffce54');
+    spawnPopText(this.x, this.y - 30, icy ? 'FREEZE!' : 'BOOM!', icy ? '#bdf0ff' : '#ffce54', 16);
 
     for (const p of game.players) {
       if (!p.alive || p.invuln > 0) continue;
@@ -300,7 +381,8 @@ export class Boomerang {
           if (!self) p.freeze(); // a freeze-bomb is crowd control, not a self-kill
         } else {
           const [dx, dy] = norm(p.x - this.x, p.y - this.y);
-          p.die(this.origOwner, dx, dy);
+          const tag = self ? {} : this.rally > 0 ? { tag: this.rally >= 2 ? `RALLY x${this.rally} KILL!` : 'HOT POTATO!', style: 3 + this.rally } : shotTag(this, p);
+          p.die(this.origOwner, dx, dy, { pop: 'KABOOM!', cause: 'bomb', ...tag });
           if (self) this.origOwner.stats.bombSelfKills++; // "Short Fuse"
         }
       }
@@ -314,6 +396,9 @@ export class Boomerang {
         game.hazards.push(new FirePatch(this.x + Math.cos(a) * ringR, this.y + Math.sin(a) * ringR, this.origOwner));
       }
     }
+
+    // the shockwave hurls survivors (and passing boomerangs) outward
+    if (!icy) blastKnock(this.x, this.y, R, this.origOwner);
 
     if (this.isMain) this.origOwner.loseBoomerang();
   }

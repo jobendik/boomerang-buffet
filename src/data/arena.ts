@@ -1,4 +1,4 @@
-import type { Arena, Rect, Spawn, Portal, CrusherDef, SwitchDef, GateDef } from '../types';
+import type { Arena, Rect, Spawn, Portal, CrusherDef, SwitchDef, GateDef, BumperDef } from '../types';
 
 /**
  * Selectable arenas. Geometry/spawns/hazards for the *current* arena are
@@ -355,6 +355,7 @@ export let CRUSHERS: CrusherDef[] = arena.crushers;
 export let PORTALS: Portal[] = arena.portals;
 export let SWITCHES: SwitchDef[] = arena.switches;
 export let GATES: GateDef[] = arena.gates;
+export let BUMPERS: BumperDef[] = arena.bumpers ?? [];
 
 /** Select the active arena by index, republishing the live bindings. */
 export function setArena(i: number): void {
@@ -367,4 +368,5 @@ export function setArena(i: number): void {
   PORTALS = arena.portals;
   SWITCHES = arena.switches;
   GATES = arena.gates;
+  BUMPERS = arena.bumpers ?? [];
 }

@@ -2,9 +2,23 @@
 
 export type Vec2 = [number, number];
 
+export type PersonaKey = 'brawler' | 'sniper' | 'trickster' | 'bully';
+
+/** A bot temperament: multipliers over the difficulty tier's base behaviour. */
+export interface Persona {
+  title: string;
+  range: [number, number]; // preferred fighting distance (px)
+  parry: number; // appetite for batting throws back (and rallying)
+  shove: number; // appetite for dash tackles
+  craft: number; // how often a throw is a planned curve / bank shot
+  rush: number; // 0..1 — closes for the slice when the foe is unarmed
+  nerve: number; // dodge-chance multiplier
+}
+
 /** A cute-food fighter definition with its vector-art draw routine. */
 export interface Char {
   name: string;
+  persona: PersonaKey; // how the CPU plays this fighter (see PERSONAS)
   body: string;
   dark: string;
   accent: string;
@@ -74,6 +88,14 @@ export interface GateDef {
   h: number;
 }
 
+/** A spring-loaded round bumper: fires boomerangs back out faster than they
+ *  arrived, and pings fighters who hit it at speed. */
+export interface BumperDef {
+  x: number;
+  y: number;
+  r: number;
+}
+
 /** Visual family an arena belongs to — drives the themed renderer. */
 export type Biome = 'diner' | 'rooftop' | 'neon' | 'grove' | 'ice';
 
@@ -90,6 +112,7 @@ export interface Arena {
   portals: Portal[];
   switches: SwitchDef[]; // floor plates that open gates while pressed
   gates: GateDef[]; // solid blocks that retract when their switch is pressed
+  bumpers?: BumperDef[]; // spring-loaded ricochet posts
   floorA: string;
   floorB: string;
   accent: string;

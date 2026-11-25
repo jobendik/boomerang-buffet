@@ -3,7 +3,7 @@ import { BOUNDS, W } from '../constants';
 import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse, readGamepad } from '../core/input';
 import { aiThink } from '../systems/ai';
-import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
+import { resolveBoomerangClashes, resolveBoomerangHits, resolveDecoyHits, resolveParries, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
 import { spawnConfetti, spawnPopText, spawnRing } from '../systems/effects';
 import { POWERS } from '../data/powers';
 import { Particle } from '../entities/Particle';
@@ -29,7 +29,7 @@ function updateBattleRoyale(dt: number): void {
     if (!p.alive || p.invuln > 0 || !br.initiator.isEnemy(p)) continue;
     if (dist(p.x, p.y, br.cx, br.cy) > br.r + p.r) {
       const [dx, dy] = norm(p.x - br.cx, p.y - br.cy);
-      p.die(br.initiator, dx, dy, true);
+      p.die(br.initiator, dx, dy, { env: true, pop: 'OUT OF BOUNDS!', cause: 'ring' });
     }
   }
   // embers licking along the closing boundary (only once the ring is on-screen)
@@ -375,8 +375,10 @@ export function update(dt: number): void {
       let intents = p.isAI ? aiThink(p, dt) : humanIntents(p, i);
       // a blinded seeker is rooted in place during the setup window
       if (p === seeker && game.hsSetup > 0) intents = { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
+      audio.emitX = p.x; // everything this fighter triggers is panned to them
       p.update(dt, intents);
     }
+    audio.emitX = null;
     resolvePlayerCollisions(); // soft separation + frozen-shatter-on-bump
     updateSwitches(); // floor switches drive their gates + the "Switcheroo" award
     for (const c of game.crushers) c.update(dt); // move blocks + squish the pinned
@@ -384,7 +386,13 @@ export function update(dt: number): void {
     updateGolden(dt); // Golden Boomerang carry/score (no-op in other modes)
     updateBattleRoyale(dt); // shrinking lethal border (no-op unless triggered)
     // boomerangs
-    for (const b of game.boomerangs) b.update(dt);
+    for (const b of game.boomerangs) {
+      audio.emitX = b.x;
+      b.update(dt);
+    }
+    audio.emitX = null;
+    resolveBoomerangClashes(dt); // rival throws clang off each other mid-air
+    resolveParries(); // swings bat boomerangs away — before hits, so ties favour the defender
     resolveBoomerangHits();
     resolveSlashes();
     if (seeker && seeker.stats.kills > seekerKillsBefore) seeker.attemptsLeft += seeker.stats.kills - seekerKillsBefore;

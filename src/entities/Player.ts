@@ -2,13 +2,13 @@ import { ctx } from '../core/canvas';
 import { audio } from '../core/audio';
 import { clamp, dist, lerp, norm, rand, TAU } from '../core/math';
 import { BOUNDS, SLASH_RANGE, SLASH_HALF } from '../constants';
-import { CHARS } from '../data/characters';
+import { CHARS, PERSONAS } from '../data/characters';
 import { arena, OBSTACLES, SPAWNS } from '../data/arena';
 import { POWERS, EXCLUSIVE_GROUPS, type PowerKey } from '../data/powers';
 import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
-import { circleRect, resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, resolvePitSolids, nudgeFromPits, inBush } from '../systems/collision';
+import { circleRect, resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, nearPit, resolvePitSolids, nudgeFromPits, inBush, blastKnock, resolveBumpers } from '../systems/collision';
 import { spawnConfetti, spawnDashPuff, spawnExplosion, spawnFootDust, spawnPopText, spawnRing, spawnSlice } from '../systems/effects';
-import { game } from '../game/state';
+import { game, kick, pushFeed, roundDecidedBy } from '../game/state';
 import { Boomerang } from './Boomerang';
 import { Particle } from './Particle';
 import { FirePatch } from './FirePatch';
@@ -27,6 +27,25 @@ const RESPAWN_TIME = 0.9; // delay before a lost boomerang returns to hand
 const JUMP_TIME = 0.5; // seconds airborne per hop
 const JUMP_H = 30; // peak visual height of a hop
 const JUMP_CD = 0.85; // hop cooldown
+const SWAT_CD = 0.6; // recovery after a bare-handed (unarmed) swat
+const GRIP_GO = 0.0005; // velocity convergence base while pushing off (smaller = snappier)
+const GRIP_STOP = 0.00006; // …and while braking to a stop
+const STAGGER_CONTROL = 0.16; // share of normal steering kept while knocked off balance
+export const SHOVE_SPEED = 520; // knock-back launch speed of a dash tackle
+export const SHOVE_STAGGER = 0.42; // seconds a tackled fighter slides before regaining footing
+
+/** The launch numbers for a throw at `charge` (0..1) — one source of truth
+ *  for the real throw, the aiming preview and the bots' shot planning. */
+export function throwParams(charge: number, weakArm: boolean, big: boolean): { speed: number; outT: number; curve: number } {
+  charge = clamp(charge, 0.12, 1);
+  return {
+    speed: (430 + charge * 230) * (big ? 0.85 : 1), // BIG boomerangs lumber
+    // WEAK ARM (anti-power): the boomerang turns back at half the usual range
+    outT: (0.42 + charge * 0.4) * (weakArm ? 0.5 : 1),
+    // longer hold => tighter loop
+    curve: BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE),
+  };
+}
 
 interface AIState {
   tThink: number; // countdown to the next decision refresh (the bot's "reaction time")
@@ -43,6 +62,10 @@ interface AIState {
   aimErr: number; // current aim error (radians), resampled each decision tick
   meleeT: number; // point-blank slash windup countdown (-1 = not armed)
   range: number; // preferred fighting distance — per-bot personality
+  recState: number; // knock-back recovery: 0 undecided · 1 will react · -1 too dazed
+  recT: number; // reaction latency before the recovery fires
+  shoveT: number; // cooldown between tackle considerations
+  tackleT: number; // committed to a tackle run-up for this long
 }
 
 interface PlayerStats {
@@ -62,6 +85,39 @@ interface PlayerStats {
   ghostKills: number; // kills landed after you're dead    -> "Vengeful Ghost"
   distance: number; // total ground covered (px)           -> "Most Enthusiastic"
   switches: number; // floor switches stepped on           -> "Switcheroo"
+  shoves: number; // dash-tackles landed                   -> "Bumper Car"
+  ringOuts: number; // foes shoved/blasted into a hazard   -> "Sumo Champion"
+  trickKills: number; // kills that earned a callout       -> "Trick Shot Artist"
+  style: number; // cumulative style points from callouts
+  rallyKills: number; // kills with a parried boomerang    -> "Return to Sender"
+  bestRally: number; // longest parry rally taken part in  -> "Hot Potato"
+  boomClashes: number; // mid-air boomerang collisions     -> "Air Traffic Control"
+  slashClashes: number; // blade-on-blade clashes          -> "En Garde"
+  closeCalls: number; // lethal throws that barely missed  -> "Teflon"
+  recoveries: number; // shoves survived at a pit's lip    -> "Cliffhanger"
+  haunts: number; // ghost gusts unleashed after death     -> "Poltergeist"
+  selfKills: number; // deaths with nobody else to blame   -> "Own Worst Enemy"
+  roundsWon: number; // rounds taken
+  killsThisRound: number; // reset each round (for the pacifist award)
+  pacifistWins: number; // rounds won without a kill       -> "Pacifist"
+}
+
+/** What finished a fighter off — picks the kill-feed glyph. */
+export type KillCause = 'boom' | 'slash' | 'bomb' | 'burn' | 'pit' | 'crush' | 'ring' | 'squash' | 'shatter';
+
+/** Optional context for `Player.die`. */
+export interface DeathOpts {
+  /** Environmental deaths (pits, crushers, the ring) bypass DELAYED DEATH. */
+  env?: boolean;
+  /** Overrides the floating word shown at the death site. */
+  pop?: string;
+  /** Death sound flavour (frozen fighters always shatter). */
+  sfx?: 'slice' | 'crush' | 'silent';
+  /** Trick-shot callout earned by the killer ("BANK SHOT!", "DUNKED!" …). */
+  tag?: string;
+  /** Style points banked with the callout. */
+  style?: number;
+  cause?: KillCause;
 }
 
 /** A fighter — either the human (idx 0) or a CPU-controlled snack. */
@@ -132,6 +188,25 @@ export class Player {
   dyingKiller!: Player | null; // who gets the kill once the reprieve runs out
   dyingDx!: number; // death knock-back direction, replayed when it finalises
   dyingDy!: number;
+  dyingOpts!: DeathOpts; // the original blow's context, replayed with it
+  stagger!: number; // seconds of knocked-off-balance (momentum rules, steering is weak)
+  lastHitBy!: Player | null; // who last shoved/blasted us — earns the credit if we then
+  lastHitT!: number; //          fall, get squished or burn within this window
+  shoveLock!: boolean; // this dash already landed its tackle
+  slashAge!: number; // seconds since our last swing began (the blade-clash window)
+  swat!: boolean; // the current swing is a bare-handed swat (parries only, can't kill)
+  throwT!: number; // follow-through pose timer after releasing a throw (visual)
+  catchT!: number; // snag pose timer after a catch (visual)
+  cheerT!: number; // remaining seconds of post-kill gloating (visual)
+  flinchT!: number; // remaining seconds of a startled face after a near miss (visual)
+  lipT!: number; // seconds spent staggering right at a pit's lip (cliffhanger credit)
+  // dead fighters linger as mischievous ghosts (see `updateGhost`)
+  gx!: number;
+  gy!: number;
+  gvx!: number;
+  gvy!: number;
+  booCd!: number;
+  booT!: number; // visual pulse after a gust
 
   constructor(charIdx: number, idx: number, isAI: boolean) {
     this.char = CHARS[charIdx];
@@ -157,6 +232,21 @@ export class Player {
       ghostKills: 0,
       distance: 0,
       switches: 0,
+      shoves: 0,
+      ringOuts: 0,
+      trickKills: 0,
+      style: 0,
+      rallyKills: 0,
+      bestRally: 0,
+      boomClashes: 0,
+      slashClashes: 0,
+      closeCalls: 0,
+      recoveries: 0,
+      haunts: 0,
+      selfKills: 0,
+      roundsWon: 0,
+      killsThisRound: 0,
+      pacifistWins: 0,
     };
     this.reset(SPAWNS[idx % SPAWNS.length]);
     this.score = 0;
@@ -177,7 +267,12 @@ export class Player {
       parryRoll: false,
       aimErr: 0,
       meleeT: -1,
-      range: rand(205, 285), // each bot prefers its own spacing — varied personalities
+      // each bot keeps its own spacing, drawn from its fighter's temperament
+      range: rand(PERSONAS[this.char.persona].range[0], PERSONAS[this.char.persona].range[1]),
+      recState: 0,
+      recT: 0,
+      shoveT: 0,
+      tackleT: 0,
     };
   }
 
@@ -229,6 +324,25 @@ export class Player {
     this.dyingKiller = null;
     this.dyingDx = 0;
     this.dyingDy = 0;
+    this.dyingOpts = {};
+    this.stagger = 0;
+    this.lastHitBy = null;
+    this.lastHitT = 0;
+    this.shoveLock = false;
+    this.slashAge = 9;
+    this.swat = false;
+    this.throwT = 0;
+    this.catchT = 0;
+    this.cheerT = 0;
+    this.flinchT = 0;
+    this.lipT = 0;
+    this.gx = sp.x;
+    this.gy = sp.y;
+    this.gvx = 0;
+    this.gvy = 0;
+    this.booCd = 1.2;
+    this.booT = 0;
+    this.stats.killsThisRound = 0;
     this.powers.clear(); // modifiers are lost on death / new round
   }
 
@@ -301,6 +415,9 @@ export class Player {
     if (!this.alive || this.invuln > 0) return;
     if (this.burning <= 0) audio.ignite();
     this.burning = Math.max(this.burning, 1.7);
+    // an ownerless flame (sudden death, a stray patch) belongs to whoever
+    // just knocked us into it
+    if (!source && this.lastHitT > 0 && this.lastHitBy) source = this.lastHitBy;
     this.burnSource = source && source.alive ? source : this.burnSource;
   }
 
@@ -318,6 +435,16 @@ export class Player {
     if (this.slashT > 0) this.slashT = Math.max(0, this.slashT - dt);
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
     if (this.frozen > 0) this.frozen = Math.max(0, this.frozen - dt);
+    if (this.stagger > 0) this.stagger = Math.max(0, this.stagger - dt);
+    if (this.lastHitT > 0) {
+      this.lastHitT -= dt;
+      if (this.lastHitT <= 0) this.lastHitBy = null;
+    }
+    this.slashAge += dt;
+    this.throwT = Math.max(0, this.throwT - dt);
+    this.catchT = Math.max(0, this.catchT - dt);
+    this.cheerT = Math.max(0, this.cheerT - dt);
+    this.flinchT = Math.max(0, this.flinchT - dt);
     if (this.streakT > 0) {
       this.streakT -= dt;
       if (this.streakT <= 0) this.streak = 0;
@@ -351,7 +478,7 @@ export class Player {
         );
       }
       if (this.dyingTimer <= 0) {
-        this.die(this.dyingKiller, this.dyingDx, this.dyingDy);
+        this.die(this.dyingKiller, this.dyingDx, this.dyingDy, this.dyingOpts);
         return;
       }
     }
@@ -396,7 +523,7 @@ export class Player {
         const src = this.burnSource;
         if (src && src !== this) src.stats.burnKills++;
         const dir: Vec2 = [rand(-1, 1), rand(-1, 1)];
-        this.die(src, dir[0], dir[1], false, 'TOASTED!');
+        this.die(src, dir[0], dir[1], { pop: 'TOASTED!', cause: 'burn', ...this.envCredit(src, 'ROASTED!') });
         return;
       }
     }
@@ -439,11 +566,17 @@ export class Player {
     } else {
       const [mx, my] = intents.move;
       const target = norm(mx, my);
-      const goal = mx || my ? [target[0] * baseSpeed, target[1] * baseSpeed] : [0, 0];
-      // slick (icy) arenas converge far slower — momentum carries you around
-      const grip = arena.slick && !this.airborne ? 0.16 : 0.0009;
-      this.vx = lerp(this.vx, goal[0], 1 - Math.pow(grip, dt));
-      this.vy = lerp(this.vy, goal[1], 1 - Math.pow(grip, dt));
+      const moving = !!(mx || my);
+      const goal = moving ? [target[0] * baseSpeed, target[1] * baseSpeed] : [0, 0];
+      // slick (icy) arenas converge far slower — momentum carries you around.
+      // On dry floor, planting your feet bites harder than pushing off: stops
+      // are crisp (precise spacing) while starts keep a hint of weight.
+      const grip = arena.slick && !this.airborne ? 0.16 : moving ? GRIP_GO : GRIP_STOP;
+      let k = 1 - Math.pow(grip, dt);
+      // knocked off balance: momentum rules, steering barely registers
+      if (this.stagger > 0) k *= STAGGER_CONTROL;
+      this.vx = lerp(this.vx, goal[0], k);
+      this.vy = lerp(this.vy, goal[1], k);
     }
 
     // walk-cycle blend + footstep dust while running on the ground
@@ -482,6 +615,8 @@ export class Player {
         this.vx = d[0] * 660;
         this.vy = d[1] * 660;
         this.dashT = 0.17;
+        this.shoveLock = false;
+        this.stagger = 0; // a dash is the recovery tech: it cancels a knock-back outright
         this.dashCd = caffeinated ? 0.22 : 0.7; // Caffeinated greatly cuts dash cooldown
         this.invuln = Math.max(this.invuln, 0.26);
         this.squashT = 0.16; // a kick of stretch as the dash fires
@@ -498,11 +633,25 @@ export class Player {
       this.stats.dashes++;
     }
 
-    // slash trigger — only while ARMED (mirrors Boomerang Fu's state machine).
-    // A Hide & Seek seeker may only swing while attempts remain.
-    if (!frozen && !this.airborne && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0 && (!this.isSeeker || this.attemptsLeft > 0)) {
+    // slash trigger. ARMED, it's the blade: kills up close and parries
+    // boomerangs. UNARMED, the same button is a bare-handed SWAT — it can't
+    // hurt anyone, but a well-timed one still bats a boomerang away (a
+    // narrower arc and a longer recovery make it the riskier parry). That's
+    // what lets a rally run: thrower and parrier trading an ever-faster
+    // boomerang until somebody's timing cracks.
+    // A Hide & Seek seeker may only swing while attempts remain; hiders can't.
+    if (!frozen && !this.airborne && intents.slash && !this.armed && !this.isHider && this.slashCd <= 0 && this.slashT <= 0) {
+      this.slashT = SLASH_ACTIVE;
+      this.slashAge = 0;
+      this.swat = true;
+      this.slashCd = SWAT_CD;
+      this.swingDir = -this.swingDir;
+      audio.swat();
+    } else if (!frozen && !this.airborne && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0 && (!this.isSeeker || this.attemptsLeft > 0)) {
       if (this.isSeeker) this.attemptsLeft--;
       this.slashT = SLASH_ACTIVE;
+      this.slashAge = 0;
+      this.swat = false;
       this.slashCd = this.powers.has('EXTRA') ? SLASH_CD_FAST : SLASH_CD;
       this.swingDir = -this.swingDir; // alternate forehand/backhand swings
       // STAB lunges the fighter forward on the swing — an aggressive gap-closer.
@@ -569,6 +718,7 @@ export class Player {
       resolveCircleObstacles(this);
       resolveGates(this);
     }
+    resolveBumpers(this); // spring posts ping anyone arriving at speed
     resolveCrushers(this); // crushing blocks are solid walls while at rest/moving
     resolvePortals(this, dt);
 
@@ -583,6 +733,15 @@ export class Player {
       if (this.dashT <= 0 && !this.airborne && inPit(this.x, this.y)) {
         this.fall();
         return;
+      }
+      // "Cliffhanger": knocked right to a pit's lip and still standing after
+      if (this.stagger > 0 && nearPit(this.x, this.y, 30)) this.lipT += dt;
+      else if (this.lipT > 0) {
+        if (this.lipT > 0.08 && this.stagger <= 0.02) {
+          this.stats.recoveries++;
+          spawnPopText(this.x, this.y - this.r - 8, 'PHEW!', '#9fd6ff', 15);
+        }
+        this.lipT = 0;
       }
     }
 
@@ -697,7 +856,7 @@ export class Player {
       if (!q.alive || q.invuln > 0 || !this.isEnemy(q)) continue;
       if (dist(this.x, this.y, q.x, q.y) < this.r + q.r) {
         const [dx, dy] = norm(q.x - this.x, q.y - this.y);
-        q.die(this, dx, dy);
+        q.die(this, dx, dy, { pop: 'SQUASHED!', cause: 'squash', tag: 'TELEFRAG!', style: 3 });
       }
     }
     return true;
@@ -736,13 +895,11 @@ export class Player {
     }
     charge = clamp(charge, 0.12, 1);
     const [ax, ay] = this.aim;
-    const speed = 430 + charge * 230;
-    // WEAK ARM (anti-power): the boomerang turns back at half the usual range.
-    const outTime = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
-    // longer hold => tighter loop; sideways momentum picks which way it banks
-    const curve = (BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE)) * this.curveSide();
-    const main = new Boomerang(this, ax * speed, ay * speed, outTime, true);
-    main.curve = curve;
+    // (BIG's lumbering is applied by the boomerang itself as it flies)
+    const tp = throwParams(charge, this.powers.has('WEAKARM'), false);
+    // sideways momentum picks which way it banks
+    const main = new Boomerang(this, ax * tp.speed, ay * tp.speed, tp.outT, true);
+    main.curve = tp.curve * this.curveSide();
     // The Golden Boomerang carrier's modifiers are suspended — a plain throw only.
     if (!this.isGoldCarrier) {
       main.big = this.powers.has('BIG');
@@ -759,13 +916,14 @@ export class Player {
     }
     game.boomerangs.push(main);
     this.boomsInHand--;
+    this.throwT = 0.22;
     audio.throw_(charge);
   }
 
   /** Which way a throw banks: strafing sideways relative to your aim carries
    *  that momentum into the curve (move left of aim → bank left), so the arc
    *  is player-steerable. Standing still keeps the classic clockwise loop. */
-  private curveSide(): number {
+  curveSide(): number {
     const cross = this.aim[0] * this.vy - this.aim[1] * this.vx;
     return Math.hypot(this.vx, this.vy) > 40 && Math.abs(cross) > 30 ? Math.sign(cross) : 1;
   }
@@ -781,6 +939,38 @@ export class Player {
     spawnRing(this.x, this.y, this.char.body, 0.9);
     game.shake = Math.max(game.shake, 3); // a satisfying little thunk on the catch
     this.squashT = 0.15; // the body absorbs the snag with a quick squash
+    this.catchT = 0.25;
+  }
+
+  /**
+   * Knock this fighter off balance: launch them along (dx, dy) and leave them
+   * sliding for `stagger` seconds with only a sliver of steering. `by` earns
+   * the credit if the slide ends in a pit, a crusher or the flames. A dash
+   * (or a hop over the danger) is the way out — see `update`.
+   */
+  knock(dx: number, dy: number, speed: number, stagger: number, by: Player | null): void {
+    if (!this.alive) return;
+    const [nx, ny] = norm(dx, dy);
+    this.vx = nx * speed;
+    this.vy = ny * speed;
+    this.dashT = 0;
+    this.stagger = Math.max(this.stagger, stagger);
+    this.squashT = 0.18;
+    // being bowled over spoils a wind-up: the charge is lost
+    this.charging = false;
+    this.charge = 0;
+    if (by && by !== this && by.isEnemy(this)) {
+      this.lastHitBy = by;
+      this.lastHitT = 3;
+    }
+  }
+
+  /** If a rival knocked us about moments ago, an otherwise ownerless death
+   *  (pit, crusher, flames) is theirs — with a callout for the ring-out. */
+  private envCredit(known: Player | null, tag: string): DeathOpts {
+    const by = this.lastHitBy;
+    if (!by || this.lastHitT <= 0 || (known && known !== by)) return {};
+    return { tag, style: 3 };
   }
 
   freeze(): void {
@@ -804,24 +994,30 @@ export class Player {
     audio.fall(); // slide-whistle into the void — no chop, they're simply gone
     // route through die() for the shared bookkeeping (death count, GHOST, etc.).
     // Flagged environmental: a pit ignores DELAYED DEATH (you're simply gone).
-    this.die(null, 0, 0, true, 'GONE!', 'silent');
+    // Whoever knocked us in (if anyone, recently) takes the credit.
+    const by = this.lastHitT > 0 ? this.lastHitBy : null;
+    this.die(by, 0, 0, { env: true, pop: 'GONE!', sfx: 'silent', cause: 'pit', ...this.envCredit(null, 'DUNKED!') });
   }
 
   /** Squished by a kinematic block — an environmental death, no killer. */
   crush(): void {
     if (!this.alive || this.invuln > 0) return;
     game.shake = Math.max(game.shake, 16);
-    this.die(null, 0, -1, true, 'CRUSHED!', 'crush'); // environmental: Shield still saves, DELAYED doesn't
+    const by = this.lastHitT > 0 ? this.lastHitBy : null;
+    // environmental: Shield still saves, DELAYED doesn't
+    this.die(by, 0, -1, { env: true, pop: 'CRUSHED!', sfx: 'crush', cause: 'crush', ...this.envCredit(null, 'PANCAKED!') });
     if (!this.alive) this.stats.crushDeaths++; // count only an actual squish
   }
 
-  /** `environmental` deaths (pits, crushers) bypass the DELAYED DEATH reprieve.
-   *  `pop` overrides the floating word shown at the death site; `deathSfx`
-   *  picks the death sound flavour (frozen fighters always shatter). */
-  die(killer: Player | null, dirx: number, diry: number, environmental = false, pop?: string, deathSfx: 'slice' | 'crush' | 'silent' = 'slice'): void {
+  /** The one way out. See `DeathOpts` for the optional context. */
+  die(killer: Player | null, dirx: number, diry: number, o: DeathOpts = {}): void {
     if (!this.alive) return;
-    // Shield intercepts the next lethal hit instead of dying.
-    if (this.powers.has('SHIELD')) {
+    const environmental = !!o.env;
+    const deathSfx = o.sfx ?? 'slice';
+    const pop = o.pop;
+    // Shield intercepts the next lethal hit instead of dying (a bubble is no
+    // parachute, though: the void takes you regardless).
+    if (this.powers.has('SHIELD') && o.cause !== 'pit') {
       this.powers.delete('SHIELD');
       this.invuln = Math.max(this.invuln, 0.6);
       this.shieldFlash = 0.4;
@@ -839,6 +1035,7 @@ export class Player {
       this.dyingKiller = killer;
       this.dyingDx = dirx;
       this.dyingDy = diry;
+      this.dyingOpts = o;
       audio.heartbeat(); // borrowed time starts pounding
       spawnRing(this.x, this.y, POWERS.DELAYED.color, 1.2);
       return;
@@ -859,8 +1056,17 @@ export class Player {
     const wasFrozen = this.frozen > 0;
     this.alive = false;
     this.stats.deaths++;
+    // the departed linger as ghosts, drifting up from where they fell
+    this.gx = this.x;
+    this.gy = this.y;
+    this.gvx = 0;
+    this.gvy = 0;
+    this.booCd = 1.6;
+    if (!killer || killer === this) this.stats.selfKills++;
     if (killer && killer !== this) {
       killer.stats.kills++;
+      killer.stats.killsThisRound++;
+      killer.cheerT = 1.1;
       // kill-streak fanfare: kills chained inside the window escalate the pop
       killer.streak = killer.streakT > 0 ? killer.streak + 1 : 1;
       killer.streakT = 2.2;
@@ -873,18 +1079,34 @@ export class Player {
       if (wasFrozen) killer.stats.frozenKills++; // "Ice Breaker"
       if (killer.bamboozled > 0) killer.stats.bamboozledKills++; // "Drunken Master"
       // a kill landed by a dead fighter (their boomerang/bomb/Last Laugh blast
-      // outliving them) is the work of a "Vengeful Ghost"
+      // outliving them, or a ghostly gust) is the work of a "Vengeful Ghost"
       if (!killer.alive) killer.stats.ghostKills++;
+      if (o.cause === 'pit' || o.cause === 'crush' || (o.cause === 'burn' && o.tag)) killer.stats.ringOuts++;
     }
+    // trick-shot callout: a second, golden pop above the death word, a line in
+    // the kill feed and style points toward the end-of-match awards
+    let tag = o.tag;
+    if (killer && killer !== this && !killer.alive && !tag) tag = 'FROM THE GRAVE!';
+    if (tag && killer && killer !== this) {
+      killer.stats.trickKills++;
+      killer.stats.style += o.style ?? 1;
+      spawnPopText(this.x, this.y - 26, tag, '#ffd23a', 22);
+      spawnConfetti(this.x, this.y - 30, 6);
+      audio.trick();
+    }
+    pushFeed(killer && killer !== this ? killer : null, this, o.cause ?? 'boom', tag);
     this.burning = 0;
     this.frozen = 0;
+    this.stagger = 0;
     if (wasFrozen) audio.shatter();
     else if (deathSfx === 'crush') audio.crush();
     else if (deathSfx !== 'silent') audio.slice();
+    audio.yelp(this.charIdx);
     spawnSlice(this.x, this.y, this.char, dirx, diry);
     spawnPopText(this.x, this.y, pop ?? (wasFrozen ? 'SHATTERED!' : 'SLICED!'), wasFrozen ? '#bdf0ff' : '#fff3df');
     if (wasFrozen) spawnRing(this.x, this.y, '#bdf0ff', 1.3); // the ice block shatters
     game.shake = Math.max(game.shake, 14);
+    kick(dirx, diry, 10); // the camera lurches along the blow
     game.hitstop = Math.max(game.hitstop, 0.09);
 
     // cinematic beats: EVERY slice gets a micro slow-mo so the two halves are
@@ -892,10 +1114,15 @@ export class Player {
     // stretches the moment further (the blueprint's time-dilation)
     if (game.state === 'playing') {
       game.slowmo = Math.max(game.slowmo, 0.28);
-      const left = game.players.filter((q) => q.alive).length;
-      if (left === 1 && game.players.length > 1) {
-        game.slowmo = Math.max(game.slowmo, 0.75);
+      if (roundDecidedBy(this)) {
+        game.slowmo = Math.max(game.slowmo, 0.85);
         audio.bigkill(); // deep sub-drop under the round-deciding slice
+        // the finishing blow gets the camera's full attention
+        const fx = killer && killer.alive ? (this.x + killer.x) / 2 : this.x;
+        const fy = killer && killer.alive ? (this.y + killer.y) / 2 : this.y;
+        game.cam.focusX = fx;
+        game.cam.focusY = fy;
+        game.cam.punch = 1;
       }
       if (killer && killer.isGoldCarrier) game.slowmo = Math.max(game.slowmo, 0.6);
     }
@@ -911,9 +1138,10 @@ export class Player {
         if (!q.alive || q.invuln > 0 || !this.isEnemy(q)) continue;
         if (dist(this.x, this.y, q.x, q.y) < R + q.r) {
           const [dx, dy] = norm(q.x - this.x, q.y - this.y);
-          q.die(this, dx, dy);
+          q.die(this, dx, dy, { pop: 'KABOOM!', cause: 'bomb', tag: 'LAST LAUGH!', style: 2 });
         }
       }
+      blastKnock(this.x, this.y, R, this);
     }
   }
 
