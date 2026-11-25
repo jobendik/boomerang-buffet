@@ -8,11 +8,13 @@ import { drawBoomShape, roundRectPath } from '../gfx/shapes';
 import { setFace } from '../data/characters';
 import { fontB, fontD, keycap, pill, UI } from './widgets';
 import { game } from '../game/state';
+import { TEAM_TINTS } from '../entities/Player';
+import { PERSONAS } from '../data/characters';
 import type { Player } from '../entities/Player';
 
 /** In-game HUD: scoreboard cards, objective banner, pickup toasts, cooldowns. */
 
-const TEAM_COLORS = ['#5ad1ff', '#ff7ad0'];
+const TEAM_COLORS = TEAM_TINTS;
 
 /** Label for a local human's card/locator: "YOU" when solo, else "P1"-"P4"
  *  matching their control-scheme slot (see `humanIntents` in game/update.ts). */
@@ -93,6 +95,13 @@ function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
   ctx.textBaseline = 'middle';
   const name = p.isAI ? p.char.name : game.numHumans <= 1 ? 'You' : humanLabel(p);
   ctx.fillText(name, 46, 14);
+  // a bot's temperament, so you know who you're dealing with
+  if (p.isAI && w > 130 && p.powers.size <= 2) {
+    const nw = ctx.measureText(name).width;
+    ctx.fillStyle = 'rgba(189,164,207,.7)';
+    ctx.font = fontB(8.5, 800);
+    ctx.fillText(PERSONAS[p.char.persona].title.toUpperCase(), 46 + nw + 6, 14.5);
+  }
 
   if (game.mode === 2) {
     // Golden mode: a hold-progress bar toward the win

@@ -4,12 +4,13 @@ import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse, readGamepad } from '../core/input';
 import { aiThink, ghostThink } from '../systems/ai';
 import { updateBushes } from '../systems/bushes';
-import { resolveBoomerangClashes, resolveBoomerangHits, resolveDecoyHits, resolveParries, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
+import { inPit, resolveBoomerangClashes, resolveBoomerangHits, resolveDecoyHits, resolveParries, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
 import { spawnConfetti, spawnPopText, spawnRing } from '../systems/effects';
 import { POWERS } from '../data/powers';
 import { Particle } from '../entities/Particle';
 import { game } from './state';
-import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
+import type { GameState } from './state';
+import { endRoundCheck, pickupSpawnChance, spawnPickup, startMatch, startRound } from './flow';
 import type { Intents, Vec2 } from '../types';
 import type { Player } from '../entities/Player';
 
@@ -65,9 +66,26 @@ function updateGolden(dt: number): void {
     }
     return;
   }
-  // unheld: the first living fighter to touch it becomes the new carrier
+  // unheld: a fumbled artifact skitters to rest (bouncing off the walls, and
+  // never coming to rest over a pit)…
   g.carrier = null;
+  g.lockT = Math.max(0, g.lockT - dt);
+  if (g.vx || g.vy) {
+    g.x += g.vx * dt;
+    g.y += g.vy * dt;
+    if (g.x < BOUNDS.l + 16 || g.x > BOUNDS.r - 16) g.vx = -g.vx;
+    if (g.y < BOUNDS.t + 16 || g.y > BOUNDS.b - 16) g.vy = -g.vy;
+    g.x = Math.min(BOUNDS.r - 16, Math.max(BOUNDS.l + 16, g.x));
+    g.y = Math.min(BOUNDS.b - 16, Math.max(BOUNDS.t + 16, g.y));
+    const drag = Math.pow(0.04, dt);
+    g.vx *= drag;
+    g.vy *= drag;
+    if (Math.hypot(g.vx, g.vy) < 25 && !inPit(g.x, g.y)) g.vx = g.vy = 0;
+    else if (Math.hypot(g.vx, g.vy) < 25) [g.vx, g.vy] = norm((BOUNDS.l + BOUNDS.r) / 2 - g.x, (BOUNDS.t + BOUNDS.b) / 2 - g.y).map((v) => v * 120);
+  }
+  // …and the first living fighter to touch it becomes the new carrier
   for (const p of game.players) {
+    if (p === g.lockFor && g.lockT > 0) continue;
     if (p.alive && dist(p.x, p.y, g.x, g.y) < p.r + 16) {
       g.carrier = p;
       spawnRing(p.x, p.y, '#ffd23a', 1.3);
@@ -220,9 +238,48 @@ function humanIntents(p: Player, slot: number): Intents {
   }
 }
 
+/* ------------------------------ attract mode ------------------------------ */
+
+let attractPhase: GameState['state'] | null = null;
+let attractRoster: unknown = null;
+
+/**
+ * The title screen's backdrop is the game itself: four Spicy bots playing a
+ * never-ending match, silently, behind the logo. The menu owns `game.state`,
+ * so each frame we lend the simulation its own phase (and a bots-only lobby),
+ * step it once through the ordinary `update`, then hand everything back.
+ */
+function attractStep(dt: number): void {
+  const lobby = { numHumans: game.numHumans, numPlayers: game.numPlayers, mode: game.mode, arenaSel: game.arenaSel, target: game.target, difficulty: game.difficulty };
+  Object.assign(game, { numHumans: 0, numPlayers: 4, mode: 0, arenaSel: -1, target: 99, difficulty: 2 });
+  audio.quiet = true;
+  try {
+    // (re)start whenever the roster isn't ours — first visit, or back from a real match
+    if (!attractPhase || game.players !== attractRoster) {
+      startMatch();
+      attractRoster = game.players;
+      attractPhase = game.state;
+    }
+    game.state = attractPhase;
+    update(dt);
+    attractPhase = game.state === 'matchover' || game.state === 'menu' ? null : game.state;
+  } finally {
+    game.state = 'menu';
+    audio.quiet = false;
+    Object.assign(game, lobby);
+  }
+}
+
 export function update(dt: number): void {
   // Esc pause: hold the whole sim (render keeps presenting the frozen frame)
   if (game.paused) return;
+
+  // menus: the title runs its attract match; the other pages just tick the clock
+  if (game.state === 'menu') {
+    if (game.menuPage === 'title') attractStep(dt);
+    else game.time += dt;
+    return;
+  }
 
   const raw = dt;
   // cinematic slow-mo (round-deciding kills): the timer burns in real time
@@ -270,7 +327,6 @@ export function update(dt: number): void {
   for (const d of game.decals) d.t -= dt;
   game.decals = game.decals.filter((d) => d.t > 0);
 
-  if (game.state === 'menu') return;
   if (game.state === 'matchover') {
     // confetti drifts over the podium for as long as the screen is up
     if (Math.random() < 0.2) spawnConfetti(rand(W * 0.1, W * 0.9), -14, 2);

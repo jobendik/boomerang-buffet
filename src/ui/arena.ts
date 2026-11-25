@@ -852,7 +852,7 @@ export function drawBushCanopies(): void {
     buildBushSprites();
     bushKey = arena.name;
   }
-  const live = game.state !== 'menu' && game.bushes.length === arena.bushes.length;
+  const live = game.bushes.length === arena.bushes.length;
   arena.bushes.forEach((B, i) => {
     const st = live ? game.bushes[i] : null;
     if (st && st.burnt) return;
@@ -959,5 +959,5 @@ export function drawArena(): void {
   drawSwitches();
   drawGates(dt);
   // menus use the arena as a backdrop: put its shrubbery back
-  if (game.state === 'menu') drawBushCanopies();
+  if (game.state === 'menu' && game.menuPage !== 'title') drawBushCanopies();
 }

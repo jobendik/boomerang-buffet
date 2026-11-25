@@ -36,17 +36,18 @@ const GHOST_REACH = 78; // radius of a ghost's gust
 const GHOST_CD = 3.2; // seconds between gusts
 /** Overhead marker tints for local humans P1–P4 (distinct from any fighter's palette). */
 export const HUMAN_TINTS = ['#ffd23a', '#5ad1ff', '#ff7ad0', '#8affd6'];
+/** Squad colours for Team Up (shared with the HUD). */
+export const TEAM_TINTS = ['#5ad1ff', '#ff7ad0'];
 export const SHOVE_SPEED = 520; // knock-back launch speed of a dash tackle
 export const SHOVE_STAGGER = 0.42; // seconds a tackled fighter slides before regaining footing
 
 /** The launch numbers for a throw at `charge` (0..1) — one source of truth
  *  for the real throw, the aiming preview and the bots' shot planning. */
-export function throwParams(charge: number, weakArm: boolean, big: boolean): { speed: number; outT: number; curve: number } {
+export function throwParams(charge: number, big: boolean): { speed: number; outT: number; curve: number } {
   charge = clamp(charge, 0.12, 1);
   return {
     speed: (430 + charge * 230) * (big ? 0.85 : 1), // BIG boomerangs lumber
-    // WEAK ARM (anti-power): the boomerang turns back at half the usual range
-    outT: (0.42 + charge * 0.4) * (weakArm ? 0.5 : 1),
+    outT: 0.42 + charge * 0.4,
     // longer hold => tighter loop
     curve: BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE),
   };
@@ -593,8 +594,9 @@ export class Player {
     if (this.squashT > 0) this.squashT = Math.max(0, this.squashT - dt);
     this.dustT -= dt;
     if (runSpeed > 170 && !this.airborne && this.dashT <= 0 && this.dustT <= 0) {
-      this.dustT = 0.16;
-      audio.step();
+      // a shove's slide scuffs up a continuous skid; running just patters
+      this.dustT = this.stagger > 0 ? 0.03 : 0.16;
+      if (this.stagger <= 0) audio.step();
       spawnFootDust(this.x, this.y + this.r * 0.8);
     }
 
@@ -949,7 +951,7 @@ export class Player {
     charge = clamp(charge, 0.12, 1);
     const [ax, ay] = this.aim;
     // (BIG's lumbering is applied by the boomerang itself as it flies)
-    const tp = throwParams(charge, this.powers.has('WEAKARM'), false);
+    const tp = throwParams(charge, false);
     // sideways momentum picks which way it banks
     const main = new Boomerang(this, ax * tp.speed, ay * tp.speed, tp.outT, true);
     main.curve = tp.curve * this.curveSide();
@@ -1004,6 +1006,28 @@ export class Player {
   knock(dx: number, dy: number, speed: number, stagger: number, by: Player | null): void {
     if (!this.alive) return;
     const [nx, ny] = norm(dx, dy);
+    // HEAVYWEIGHT: planted like a fridge — a shove barely rocks them
+    if (this.powers.has('HEAVY') && !this.isGoldCarrier) {
+      this.vx += nx * speed * 0.18;
+      this.vy += ny * speed * 0.18;
+      spawnPopText(this.x, this.y - this.r - 8, 'OOF.', POWERS.HEAVY.color, 13);
+      return;
+    }
+    // tackle the Golden Boomerang's carrier and it squirts loose, skittering
+    // off along the blow — a fumble anyone (but the fumbler, for a beat) can
+    // pounce on
+    if (this.isGoldCarrier && game.golden && by) {
+      const g = game.golden;
+      g.carrier = null;
+      g.x = this.x + nx * 26;
+      g.y = this.y + ny * 26;
+      g.vx = nx * 300;
+      g.vy = ny * 300;
+      g.lockFor = this;
+      g.lockT = 0.7;
+      spawnPopText(this.x, this.y - this.r - 10, 'FUMBLE!', '#ffd23a', 18);
+      audio.golden();
+    }
     this.vx = nx * speed;
     this.vy = ny * speed;
     this.dashT = 0;
@@ -1204,6 +1228,7 @@ export class Player {
   /** What this fighter is feeling right now — poses the shared face rig. */
   private mood(): Mood {
     if (this.frozen > 0) return 'frozen';
+    if (game.finishing && this.burning <= 0) return 'happy'; // still standing when it's decided
     if (this.burning > 0 || this.dyingTimer > 0) return 'panic';
     if (this.stagger > 0 || this.bamboozled > 0) return 'dizzy';
     if (this.dashT > 0 || this.airT > 0) return 'effort';
@@ -1273,7 +1298,20 @@ export class Player {
     const zk = this.jumpZ / JUMP_H; // 0 grounded … 1 at apex
     const baseA = 1; // (a bush's canopy is drawn over us — it does the hiding)
     const flick = this.invuln > 0 && this.airT <= 0 && this.dashT <= 0 && Math.floor(game.time * 20) % 2 === 0 ? 0.55 : 1;
-    const by = this.y + bobY - this.jumpZ; // body centre on screen
+    // the last one standing bounces on the spot while the round winds down
+    const jig = game.finishing && this.burning <= 0 ? Math.abs(Math.sin(game.time * 22)) * 7 : 0;
+    const by = this.y + bobY - this.jumpZ - jig; // body centre on screen
+
+    // Team Up: a squad-coloured ring on the floor — friend or foe at a glance
+    if (this.team >= 0) {
+      ctx.strokeStyle = TEAM_TINTS[this.team % TEAM_TINTS.length];
+      ctx.globalAlpha = 0.75;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(this.x, this.y + r * 1.02, r * 1.15, r * 0.52, 0, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
 
     // shadow — stays grounded but shrinks & fades as the fighter hops upward
     ctx.fillStyle = `rgba(0,0,0,${0.3 - zk * 0.16})`;
@@ -1659,7 +1697,7 @@ export class Player {
   /** Simulate the charged throw with the live flight maths and dot its path
    *  — THROUGH its ricochets, so a bank shot can be lined up on purpose. */
   private drawThrowPreview(): void {
-    const tp = throwParams(this.charge, this.powers.has('WEAKARM'), this.powers.has('BIG'));
+    const tp = throwParams(this.charge, this.powers.has('BIG'));
     let outT = tp.outT;
     // mirror doThrow's bank-side choice so the dots always tell the truth
     const curve = this.powers.has('TELEKINESIS') ? 0 : tp.curve * this.curveSide();
@@ -1743,11 +1781,11 @@ export class Player {
         if (this.powers.has('BOMB') || this.powers.has('MULTI')) break;
       }
       if (i % 2 === 0) {
-        const fade = (0.55 - i * 0.006) * (bounces ? 0.75 : 1);
-        if (fade > 0.08) {
-          ctx.fillStyle = `hsla(${hue},100%,${bounces ? 82 : 68}%,${fade})`;
+        const fade = (0.8 - i * 0.008) * (bounces ? 0.8 : 1);
+        if (fade > 0.1) {
+          ctx.fillStyle = `hsla(${hue},100%,${bounces ? 86 : 74}%,${fade})`;
           ctx.beginPath();
-          ctx.arc(px, py, bounces ? 2.1 : 2.6, 0, TAU);
+          ctx.arc(px, py, bounces ? 2.4 : 3, 0, TAU);
           ctx.fill();
         }
       }

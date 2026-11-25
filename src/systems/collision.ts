@@ -614,7 +614,7 @@ function shove(s: Player, v: Player, nx: number, ny: number): void {
   // mostly along the tackler's line of travel, a little along the contact normal
   const [tx, ty] = norm(s.vx, s.vy);
   const [dx, dy] = norm(tx * 0.7 + nx * 0.3, ty * 0.7 + ny * 0.3);
-  v.knock(dx, dy, SHOVE_SPEED, SHOVE_STAGGER, s);
+  v.knock(dx, dy, SHOVE_SPEED * (s.powers.has('HEAVY') ? 1.5 : 1), SHOVE_STAGGER, s);
   // the tackler rebounds and their dash (with its i-frames) ends on contact —
   // a blade already swinging at them WILL connect, so tackling a ready
   // swordsman head-on is a gamble

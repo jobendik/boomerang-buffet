@@ -9,6 +9,23 @@ import { drawWorld } from '../ui/world';
 import { drawHUD, drawCenterText, drawStandings } from '../ui/hud';
 import { fontD, pill, UI } from '../ui/widgets';
 
+/** Round-intro tips: the things that turn a button-masher into a menace. */
+const TIPS = [
+  'Slash an incoming boomerang to bat it back — wherever you aim',
+  'Dash INTO a rival to shove them. Near a pit, that is a kill',
+  'Hold throw to curve it. The dots show the flight, bounces and all',
+  'Empty-handed? The slash button still swats boomerangs away',
+  'Every parry speeds the boomerang up. Keep the rally alive… if you dare',
+  'Shoved toward a pit? Dash back against it, or hop the gap',
+  'Dead is not done: steer your ghost and press any action to gust',
+  'Strafe as you release to bank the curve the other way',
+  'A dash stamps out flames — and burning bushes make poor hiding places',
+  'Bumpers fire boomerangs back out faster than they came in',
+  'Two blades at once clash. Swing first, or swing back',
+  'Your boomerang kills on the way home too. Stand where it matters',
+];
+const tipSeed = Math.floor(Math.random() * TIPS.length);
+
 /** Custom crosshair drawn at the mouse while the match runs. */
 function drawReticle(): void {
   const slot = game.controlSchemes.slice(0, game.numHumans).indexOf(0);
@@ -52,7 +69,7 @@ export function render(): void {
   // shake (toned right down under Reduced Effects)
   ctx.save();
   const shake = game.shake * (game.reduceFx ? 0.25 : 1);
-  if (shake > 0.2 && !game.paused) ctx.translate(rand(-1, 1) * shake, rand(-1, 1) * shake);
+  if (shake > 0.2 && !game.paused && game.state !== 'menu') ctx.translate(rand(-1, 1) * shake, rand(-1, 1) * shake);
 
   if (game.state === 'menu') {
     drawMenu();
@@ -97,6 +114,8 @@ export function render(): void {
   if (game.state === 'countdown') {
     // arena intro: name + flavour while the clock winds down
     pill(W / 2, H / 2 - 120, `${arena.name.toUpperCase()} — ${arena.tagline}`, 14, UI.cream);
+    // one rule of thumb per round, while everyone's waiting anyway
+    pill(W / 2, H / 2 + 74, 'TIP · ' + TIPS[(game.roundNum - 1 + tipSeed) % TIPS.length], 12.5);
     const n = Math.ceil(game.countdownT - 0.2);
     const frac = game.countdownT % 1;
     if (game.countdownT > 0.2) {
@@ -134,30 +153,33 @@ export function render(): void {
     ctx.restore();
   }
 
-  // "SHOWDOWN!" — a quick banner slam when the brawl is down to two
+  // "SHOWDOWN!" — a quick banner slam when the brawl is down to two (kept
+  // slim and see-through: there may well be a fight going on underneath it)
   if (game.state === 'playing' && game.showdownT > 0) {
     const k = 1 - game.showdownT / 1.8;
-    const inK = clamp(k / 0.12, 0, 1);
-    const outK = clamp((1 - k) / 0.25, 0, 1);
-    ctx.save();
-    ctx.globalAlpha = Math.min(inK, outK);
-    ctx.translate(W / 2 + (1 - inK) * -160, 118);
-    ctx.rotate(-0.04);
-    ctx.fillStyle = 'rgba(13,8,22,.8)';
-    ctx.fillRect(-W, -24, W * 2, 46);
-    ctx.fillStyle = UI.red;
-    ctx.fillRect(-W, -27, W * 2, 3);
-    ctx.fillRect(-W, 22, W * 2, 3);
-    ctx.font = fontD(34);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 6;
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = UI.ink;
-    ctx.strokeText('SHOWDOWN!', 0, 1);
-    ctx.fillStyle = UI.gold;
-    ctx.fillText('SHOWDOWN!', 0, 1);
-    ctx.restore();
+    const inK = clamp(k / 0.1, 0, 1);
+    const outK = clamp((0.75 - k) / 0.2, 0, 1);
+    if (outK > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(inK, outK);
+      ctx.translate(W / 2 + (1 - inK) * -160, 104);
+      ctx.rotate(-0.035);
+      ctx.fillStyle = 'rgba(13,8,22,.55)';
+      ctx.fillRect(-W, -18, W * 2, 36);
+      ctx.fillStyle = UI.red;
+      ctx.fillRect(-W, -20, W * 2, 2);
+      ctx.fillRect(-W, 18, W * 2, 2);
+      ctx.font = fontD(28);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 5;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = UI.ink;
+      ctx.strokeText('SHOWDOWN!', 0, 1);
+      ctx.fillStyle = UI.gold;
+      ctx.fillText('SHOWDOWN!', 0, 1);
+      ctx.restore();
+    }
   }
 
   // Hide & Seek: the seeker's view is blacked out while the hiders scatter

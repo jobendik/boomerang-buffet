@@ -103,6 +103,9 @@ class AudioEngine {
    * coordinates through each call. `null` = centred (UI, global stingers).
    */
   emitX: number | null = null;
+  /** Swallow every sound & music request (the title screen's attract-mode
+   *  match plays silently behind the menu music). */
+  quiet = false;
 
   private master: GainNode | null = null; // everything
   private sfxBus: GainNode | null = null; // one-shots
@@ -189,7 +192,7 @@ class AudioEngine {
 
   /** Core one-shot playback with variation pick, jitter, gating and caps. */
   private play(key: string, vol = 1, rate = 1): void {
-    if (!this.ac || !this.sfxBus || this.muted) return;
+    if (!this.ac || !this.sfxBus || this.muted || this.quiet) return;
     const cfg = CFG[key];
     const bank = this.buffers.get(key);
     if (!cfg || !bank || !bank.length) return;
@@ -239,7 +242,7 @@ class AudioEngine {
    * deliberately simple (and quiet) — it seasons the sample mix, never leads.
    */
   private tone(type: OscillatorType, f0: number, f1: number, dur: number, vol: number, delay = 0): void {
-    if (!this.ac || !this.sfxBus || this.muted) return;
+    if (!this.ac || !this.sfxBus || this.muted || this.quiet) return;
     const t0 = this.ac.currentTime + delay;
     const osc = this.ac.createOscillator();
     osc.type = type;
@@ -260,6 +263,7 @@ class AudioEngine {
 
   /** Request a music bed; switches with a short crossfade. `null` stops it. */
   music(name: MusicName | null): void {
+    if (this.quiet) return;
     this.desiredMusic = name;
     this.syncMusic();
   }
@@ -303,7 +307,7 @@ class AudioEngine {
    * to the audio graph when a target actually changes.
    */
   setMusicMood(rate: number, cutoff: number): void {
-    if (!this.ac || !this.musicLP || this.ducked) return;
+    if (!this.ac || !this.musicLP || this.ducked || this.quiet) return;
     if (this.current && Math.abs(rate - this.musicRate) > 0.004) {
       this.musicRate = rate;
       this.current.src.playbackRate.setTargetAtTime(rate, this.ac.currentTime, 0.12);
@@ -419,7 +423,7 @@ class AudioEngine {
    */
   chargeTone(k: number): void {
     if (!this.ac || !this.sfxBus) return;
-    if (k <= 0 || this.muted) {
+    if (k <= 0 || this.muted || this.quiet) {
       if (this.chargeGain) this.chargeGain.gain.setTargetAtTime(0, this.ac.currentTime, 0.03);
       return;
     }

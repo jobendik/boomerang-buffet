@@ -96,7 +96,7 @@ export function startRound(): void {
   game.flash = 0;
   // Golden Boomerang resets to centre each round; carried time is cumulative
   if (game.mode === 2) {
-    game.golden = { x: (BOUNDS.l + BOUNDS.r) / 2, y: (BOUNDS.t + BOUNDS.b) / 2, carrier: null, bob: 0 };
+    game.golden = { x: (BOUNDS.l + BOUNDS.r) / 2, y: (BOUNDS.t + BOUNDS.b) / 2, carrier: null, bob: 0, vx: 0, vy: 0, lockFor: null, lockT: 0 };
   } else {
     game.golden = null;
   }

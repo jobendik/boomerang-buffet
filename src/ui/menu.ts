@@ -97,22 +97,6 @@ function endScreen(): void {
 function drawTitle(): void {
   const t = game.time;
 
-  // a parade of the cast marching along the bottom of the arena
-  const stride = (W + 140) / CHARS.length;
-  for (let i = 0; i < CHARS.length; i++) {
-    const x = ((t * 46 + i * stride) % (W + 140)) - 70;
-    const y = 560 + Math.sin(t * 9 + i * 1.7) * 2.5;
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,.25)';
-    ctx.beginPath();
-    ctx.ellipse(x, y + 17, 15, 6, 0, 0, TAU);
-    ctx.fill();
-    ctx.translate(x, y);
-    ctx.rotate(Math.sin(t * 9 + i * 1.7) * 0.06);
-    CHARS[i].draw(CHARS[i], 17, [1, 0.15]);
-    ctx.restore();
-  }
-
   // logo: a slow-spinning boomerang halo behind two stacked wordmarks
   const ly = 150 + Math.sin(t * 1.4) * 5;
   ctx.save();
@@ -169,7 +153,7 @@ function drawTitle(): void {
   ctx.restore();
   ctx.restore();
 
-  pill(W / 2, ly + 102, 'A SNACK-SIZED ARENA BRAWLER — SLICE, DASH & PARRY', 13);
+  pill(W / 2, ly + 102, 'A SNACK-SIZED ARENA BRAWLER — SLICE, SHOVE & RALLY', 13);
 
   // main buttons
   btn(W / 2 - 150, 372, 300, 64, 'PLAY', 'play', { primary: true, px: 30 });
@@ -189,7 +173,7 @@ function drawTitle(): void {
   ctx.font = fontB(11, 700);
   ctx.textAlign = 'right';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('best with mouse + keyboard', W - 16, H - 12);
+  ctx.fillText('1–4 players · mouse, keyboard & gamepads', W - 16, H - 12);
 }
 
 function drawSpeaker(x: number, y: number, muted: boolean): void {
@@ -338,14 +322,14 @@ function cycler(x: number, y: number, w: number, h: number, value: string, act: 
 }
 
 /** Label + − value + stepper. */
-function stepper(x: number, y: number, w: number, label: string, value: string, act: string): void {
+function stepper(x: number, y: number, w: number, label: string, value: string, act: string, valueW = 64): void {
   ctx.fillStyle = UI.dim;
   ctx.font = fontB(12, 900);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, x, y + 14);
   const bs = 26;
-  for (const [sym, suffix, bx] of [['−', '-', x + w - bs * 2 - 64], ['+', '+', x + w - bs]] as const) {
+  for (const [sym, suffix, bx] of [['−', '-', x + w - bs * 2 - valueW], ['+', '+', x + w - bs]] as const) {
     const hov = hot(bx, y, bs, bs + 2);
     ctx.fillStyle = hov ? UI.gold : 'rgba(255,255,255,.14)';
     roundRectPath(bx, y, bs, bs + 2, 8);
@@ -359,7 +343,7 @@ function stepper(x: number, y: number, w: number, label: string, value: string, 
   ctx.fillStyle = UI.cream;
   ctx.font = fontD(17);
   ctx.textAlign = 'center';
-  ctx.fillText(value, x + w - bs - 32, y + 15);
+  ctx.fillText(value, x + w - bs - valueW / 2, y + 15);
 }
 
 function drawSetup(): void {
@@ -466,7 +450,7 @@ function drawSetup(): void {
   // control-device picker for the tabbed player — freely assignable so any
   // mix of keyboard schemes and gamepads can be used together
   const ctrlY = gy + 4 * (th + 6) + 10;
-  stepper(56, ctrlY, 384, 'CONTROLS', SCHEME_NAMES[game.controlSchemes[charTab]], 'scheme' + charTab);
+  stepper(56, ctrlY, 364, 'CONTROLS', SCHEME_NAMES[game.controlSchemes[charTab]], 'scheme' + charTab, 170);
 
   /* ---- right: match options ---- */
   panel(456, 84, 532, 466);
@@ -555,13 +539,13 @@ function drawSetup(): void {
   }
 
   btn(40, 572, 140, 52, 'BACK', 'back', { px: 20 });
-  btn(W / 2 - 10, 568, 360, 58, 'START MATCH', 'start', { primary: true, px: 26 });
+  btn(W / 2 - 10, 562, 360, 54, 'START MATCH', 'start', { primary: true, px: 26 });
   // couch joining: no menu-diving needed to add a friend
   ctx.fillStyle = 'rgba(255,243,223,.5)';
   ctx.font = fontB(11, 700);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('JOIN: press Ⓐ on a gamepad · V (WASD) · , (IJKL)      START: Enter / Options', W / 2 + 170, 638);
+  ctx.fillText('JOIN: Ⓐ on a gamepad · V (WASD keys) · comma (IJKL keys)     START: Enter / Options', W / 2 + 170, 634);
 }
 
 /**
@@ -628,7 +612,7 @@ function drawHelp(): void {
     ['M', 'Mute'],
   ];
   controls.forEach(([k, label], i) => {
-    const y = 126 + i * 30;
+    const y = 124 + i * 28;
     keycap(56, y, k, 22);
     ctx.fillStyle = UI.cream;
     ctx.font = fontB(13, 700);
@@ -643,14 +627,14 @@ function drawHelp(): void {
   ctx.font = fontB(11, 900);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('LOCAL MULTIPLAYER (SETUP → FIGHTER, per player)', 56, 372);
+  ctx.fillText('LOCAL MULTIPLAYER — join from the setup screen', 56, 362);
   const localPlayers: [string, string][] = [
-    ['WASD', 'move · V throw · X slash · C dash · Z jump'],
-    ['IJKL', 'move · , throw · O slash · U dash · N jump'],
-    ['Gamepad', 'e.g. PS5 controller — sticks move/aim, face buttons act'],
+    ['WASD', 'V throw · X slash · C dash · Z hop'],
+    ['IJKL', ', throw · O slash · U dash · N hop'],
+    ['Gamepad', 'sticks · ✕ throw · ○ slash · □ dash · △ hop'],
   ];
   localPlayers.forEach(([k, label], i) => {
-    const y = 384 + i * 15;
+    const y = 377 + i * 14.5;
     ctx.fillStyle = UI.gold;
     ctx.font = fontB(10.5, 800);
     ctx.fillText(k, 56, y);
@@ -740,7 +724,16 @@ function drawHelp(): void {
 
 export function drawMenu(): void {
   beginScreen();
-  drawArena();
+  if (game.menuPage === 'title') {
+    // attract mode: a live bot match plays out behind the logo (see update.ts)
+    drawWorld();
+    const veil = ctx.createLinearGradient(0, 0, 0, H);
+    veil.addColorStop(0, 'rgba(10,6,18,.62)');
+    veil.addColorStop(0.55, 'rgba(10,6,18,.38)');
+    veil.addColorStop(1, 'rgba(10,6,18,.5)');
+    ctx.fillStyle = veil;
+    ctx.fillRect(0, 0, W, H);
+  } else drawArena();
   if (game.menuPage === 'title') drawTitle();
   else if (game.menuPage === 'setup') drawSetup();
   else drawHelp();

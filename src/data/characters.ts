@@ -559,7 +559,7 @@ function drawCone(c: Char, r: number, look: Vec2): void {
  */
 export const PERSONAS: Record<PersonaKey, Persona> = {
   brawler: { title: 'Brawler', range: [135, 185], parry: 1.0, shove: 1.3, craft: 0.5, rush: 1, nerve: 0.85 },
-  sniper: { title: 'Sharpshooter', range: [265, 330], parry: 0.6, shove: 0.4, craft: 1.6, rush: 0, nerve: 1.1 },
+  sniper: { title: 'Sniper', range: [265, 330], parry: 0.6, shove: 0.4, craft: 1.6, rush: 0, nerve: 1.1 },
   trickster: { title: 'Trickster', range: [200, 260], parry: 2.0, shove: 0.8, craft: 1.25, rush: 0.2, nerve: 1.0 },
   bully: { title: 'Bully', range: [165, 225], parry: 0.8, shove: 2.4, craft: 0.7, rush: 0.5, nerve: 0.9 },
 };

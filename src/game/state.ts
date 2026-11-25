@@ -93,6 +93,10 @@ export interface Golden {
   y: number;
   carrier: Player | null;
   bob: number;
+  vx: number; // a fumbled artifact skitters before settling
+  vy: number;
+  lockFor: Player | null; // the fumbler can't simply scoop it straight back up…
+  lockT: number; // …for this long
 }
 
 /**

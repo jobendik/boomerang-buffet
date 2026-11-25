@@ -109,7 +109,7 @@ interface ShotPlan {
  * followed, so a "miss" off a wall can score as a hit — that's a bank shot.
  */
 function flyCandidate(p: Player, ang: number, charge: number, side: number, tx: number, ty: number, tvx: number, tvy: number, solids: Rect[]): { miss: number; bounces: number; t: number } {
-  const tp = throwParams(charge, p.powers.has('WEAKARM'), p.powers.has('BIG'));
+  const tp = throwParams(charge, p.powers.has('BIG'));
   const curve = tp.curve * side;
   const step = 1 / 36;
   const R = 11;
@@ -429,11 +429,13 @@ export function aiThink(p: Player, dt: number): Intents {
       a.shoveT = 0.3;
       let want = 0;
       if (shoveIsDeadly(best, tx, ty)) want = 1.3;
+      else if (best.isGoldCarrier) want = 0.9; // knock the Golden Boomerang loose
       else if (!p.armed && best.charging) want = 0.5;
       else if (!p.armed && !best.armed) want = 0.22;
       else if (!p.armed) want = 0.06;
       // never barge off a ledge ourselves if the mark steps aside
       const ownLanding = inPit(p.x + tx * 96, p.y + ty * 96) && game.fallProtect !== 2;
+      if (p.powers.has('HEAVY')) want = Math.max(want, 0.35) * 1.5; // built for it
       if (!ownLanding && !lineHitsObstacle(p.x, p.y, best.x, best.y) && Math.random() < want * tune.shove * persona.shove) {
         a.tackleT = 0.2;
         intents.dash = true;
