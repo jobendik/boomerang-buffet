@@ -28,6 +28,7 @@ const JUMP_TIME = 0.5; // seconds airborne per hop
 const JUMP_H = 30; // peak visual height of a hop
 const JUMP_CD = 0.85; // hop cooldown
 const SWAT_CD = 0.6; // recovery after a bare-handed (unarmed) swat
+const SLASH_BUFFER = 0.13; // a swing pressed this early still comes out when it legally can
 const GRIP_GO = 0.0005; // velocity convergence base while pushing off (smaller = snappier)
 const GRIP_STOP = 0.00006; // …and while braking to a stop
 const STAGGER_CONTROL = 0.16; // share of normal steering kept while knocked off balance
@@ -202,6 +203,8 @@ export class Player {
   shoveLock!: boolean; // this dash already landed its tackle
   slashAge!: number; // seconds since our last swing began (the blade-clash window)
   swat!: boolean; // the current swing is a bare-handed swat (parries only, can't kill)
+  slashHeld!: boolean; // the slash button was down last frame (swings are per-press)
+  slashBuf!: number; // seconds an early slash press stays buffered
   throwT!: number; // follow-through pose timer after releasing a throw (visual)
   catchT!: number; // snag pose timer after a catch (visual)
   cheerT!: number; // remaining seconds of post-kill gloating (visual)
@@ -339,6 +342,8 @@ export class Player {
     this.shoveLock = false;
     this.slashAge = 9;
     this.swat = false;
+    this.slashHeld = false;
+    this.slashBuf = 0;
     this.throwT = 0;
     this.catchT = 0;
     this.cheerT = 0;
@@ -650,14 +655,25 @@ export class Player {
     // what lets a rally run: thrower and parrier trading an ever-faster
     // boomerang until somebody's timing cracks.
     // A Hide & Seek seeker may only swing while attempts remain; hiders can't.
-    if (!frozen && !this.airborne && intents.slash && !this.armed && !this.isHider && this.slashCd <= 0 && this.slashT <= 0) {
+    //
+    // One press, one swing: holding the button does NOT auto-repeat (a held
+    // button was a standing 30%-uptime parry shield — timing should be the
+    // skill). A press that lands a moment early is buffered, so mashing
+    // through the cooldown still comes out on the first legal frame.
+    const pressed = !!intents.slash && !this.slashHeld;
+    this.slashHeld = !!intents.slash;
+    this.slashBuf = pressed ? SLASH_BUFFER : Math.max(0, this.slashBuf - dt);
+    const swing = this.slashBuf > 0 && !frozen && !this.airborne && this.slashCd <= 0 && this.slashT <= 0;
+    if (swing && !this.armed && !this.isHider) {
+      this.slashBuf = 0;
       this.slashT = SLASH_ACTIVE;
       this.slashAge = 0;
       this.swat = true;
       this.slashCd = SWAT_CD;
       this.swingDir = -this.swingDir;
       audio.swat();
-    } else if (!frozen && !this.airborne && intents.slash && this.armed && this.slashCd <= 0 && this.slashT <= 0 && (!this.isSeeker || this.attemptsLeft > 0)) {
+    } else if (swing && this.armed && (!this.isSeeker || this.attemptsLeft > 0)) {
+      this.slashBuf = 0;
       if (this.isSeeker) this.attemptsLeft--;
       this.slashT = SLASH_ACTIVE;
       this.slashAge = 0;
@@ -1297,7 +1313,9 @@ export class Player {
     const bobY = Math.sin(this.bob) * 1.8 * (1 - this.moveK * 0.5);
     const zk = this.jumpZ / JUMP_H; // 0 grounded … 1 at apex
     const baseA = 1; // (a bush's canopy is drawn over us — it does the hiding)
-    const flick = this.invuln > 0 && this.airT <= 0 && this.dashT <= 0 && Math.floor(game.time * 20) % 2 === 0 ? 0.55 : 1;
+    // i-frame flicker — but not through the countdown, where everyone is
+    // simply waiting (the spawn grace hasn't started ticking yet)
+    const flick = this.invuln > 0 && this.airT <= 0 && this.dashT <= 0 && game.state !== 'countdown' && Math.floor(game.time * 20) % 2 === 0 ? 0.55 : 1;
     // the last one standing bounces on the spot while the round winds down
     const jig = game.finishing && this.burning <= 0 ? Math.abs(Math.sin(game.time * 22)) * 7 : 0;
     const by = this.y + bobY - this.jumpZ - jig; // body centre on screen

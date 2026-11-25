@@ -1,16 +1,10 @@
 # Boomerang Buffet — TODO / Roadmap
 
-Working notes for continuing development toward the [`blueprint.md`](blueprint.md)
-(a reverse-engineering of *Boomerang Fu*). This game is an **original homage**,
-not a 1:1 port: it's **Vite + TypeScript + Canvas 2D**, single human player +
-CPU bots, no external art/audio (everything is procedural vector art + WebAudio).
-
-> A 1:1 clone is impossible/undesired (the original is Unity with FMOD, Rewired,
-> NavMesh, 6-player local co-op, 36 maps). Treat the blueprint as a **design
-> source**, port mechanics in the spirit of the source, and keep the codebase
-> small and readable.
-
----
+Working notes for continuing development. The game began as a homage built
+from [`blueprint.md`](blueprint.md) (a reverse-engineering of *Boomerang Fu*)
+and has since grown its own identity — see `README.md` for what it is now and
+`NOTES.md` for the reasoning and measurements behind the latest overhaul
+(shoves, rallies, clashes, ghosts, the finishing beat, bot temperaments).
 
 ## How to run / verify
 
@@ -18,12 +12,39 @@ CPU bots, no external art/audio (everything is procedural vector art + WebAudio)
 npm install
 npm run dev        # dev server (canvas game in browser)
 npm run typecheck  # tsc --noEmit (strict)
+npm test           # headless: combat rules, AI guardrails, arenas, chaos fuzz
+npm run sim        # AI KPI table          npm run lab   # per-arena event rates
 npm run build      # typecheck + vite build
 ```
 
-**Always run `npm run build` after each chunk of work.** It's the gate; the game
-can't be unit-tested headlessly (canvas/DOM), so build-clean + a manual dev-boot
-is the bar.
+`npm test` and `npm run build` are the gate; `.claude/skills/verify` drives
+the real thing in a browser.
+
+## Conventions added by the overhaul (on top of those below)
+
+- **Moving a fighter against their will → `Player.knock(dx, dy, speed,
+  stagger, by)`.** It records `by` for kill credit; pits, crushers and
+  flames read `lastHitBy`. Don't set `vx/vy` directly for knock-backs.
+- **`Player.die(killer, dx, dy, opts)`** takes a `DeathOpts` bag (`env`,
+  `pop`, `sfx`, `cause`, `tag`, `style`) — the old positional flags are gone.
+- **Boomerangs carry their story** (`bounces`, `portals`, `rally`, `clashes`,
+  `travel`); `shotTag()` in `collision.ts` turns it into a callout. New ways
+  for a throw to be clever belong there.
+- **`tally('event')`** (state.ts) feeds `npm run lab`. Count new mechanics.
+- **Bushes/bumpers are live state** (`game.bushes`, `game.bumpers`), built
+  per round in `flow.ts` — read those, not the static arena arrays.
+- **Bot behaviour = tier × temperament**: `TUNING[difficulty]` in `ai.ts`
+  times `PERSONAS[char.persona]` in `characters.ts`.
+
+## Ideas not yet built
+
+- Dedicated redesigns for Hide & Seek and Golden Boomerang (they inherited
+  the shared systems only).
+- Bots that use bumpers and bank shots off pistons on purpose, and that flee
+  burning bushes.
+- Per-arena ambient sound beds; character voice barks.
+- An instant replay of the match point.
+- Online play is out of scope for a couch game.
 
 ---
 
