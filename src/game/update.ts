@@ -313,8 +313,10 @@ export function update(dt: number): void {
     }
   }
 
+  // hit-stop is a REAL-time freeze: counted in unscaled seconds, so a kill's
+  // slow-mo starts after the freeze instead of being swallowed by it
   if (game.hitstop > 0) {
-    game.hitstop -= dt;
+    game.hitstop -= raw;
     if (game.state === 'playing') return;
   }
 

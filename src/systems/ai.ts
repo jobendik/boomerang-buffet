@@ -31,9 +31,10 @@ interface AITuning {
   craft: number; // odds a throw is PLANNED (curve-compensated / banked) rather than flung
   shove: number; // appetite for dash tackles when one looks good
   recover: [number, number, number]; // knocked back: odds of reacting, then latency min/max
+  temper: number; // 0..1 — how fully a bot's temperament overrides the default spacing
 }
 
-const TUNING: AITuning[] = [
+export const TUNING: AITuning[] = [
   {
     // Chill — sluggish reflexes, wobbly aim, generous openings
     reactTime: [0.6, 0.9],
@@ -48,9 +49,10 @@ const TUNING: AITuning[] = [
     meleeWindup: [0.45, 0.7],
     cqHesitate: 0.7,
     jumpDodge: false,
-    craft: 0.12,
+    craft: 0.05,
     shove: 0.2,
     recover: [0.3, 0.2, 0.32],
+    temper: 0.3,
   },
   {
     // Normal — competent but human-ish: readable delays, occasional whiffs
@@ -66,9 +68,10 @@ const TUNING: AITuning[] = [
     meleeWindup: [0.28, 0.46],
     cqHesitate: 0.55,
     jumpDodge: true,
-    craft: 0.3,
-    shove: 0.45,
+    craft: 0.2,
+    shove: 0.35,
     recover: [0.6, 0.1, 0.2],
+    temper: 0.7,
   },
   {
     // Spicy — sharp but still fallible (never frame-perfect)
@@ -87,6 +90,7 @@ const TUNING: AITuning[] = [
     craft: 0.55,
     shove: 0.7,
     recover: [0.9, 0.05, 0.12],
+    temper: 1,
   },
 ];
 
@@ -362,7 +366,12 @@ export function aiThink(p: Player, dt: number): Intents {
     intents.aimX = trueAim[0] * ce - trueAim[1] * se;
     intents.aimY = trueAim[0] * se + trueAim[1] * ce;
 
-    let idealDist = a.range * (1 - 0.6 * agg); // bloodlust closes the gap
+    // Temperament sets the spacing — but only as far as the tier allows: the
+    // easier the bots, the more everyone drifts back to a polite middle
+    // distance (measured: close-in brawlers were the one thing that made
+    // Chill noticeably deadlier, so Chill keeps its manners).
+    const spacing = lerp(245, a.range, tune.temper);
+    let idealDist = spacing * (1 - 0.6 * agg); // bloodlust closes the gap
     // a foe caught empty-handed is an invitation: the hot-headed walk right
     // in for the slice instead of trading throws from range
     if (best && !phantom && p.armed && !best.armed && persona.rush > 0) idealDist = lerp(idealDist, 46, persona.rush * 0.85);

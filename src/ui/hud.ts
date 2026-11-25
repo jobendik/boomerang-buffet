@@ -22,6 +22,12 @@ function humanLabel(p: Player): string {
   return `P${slot + 1}`;
 }
 
+/** What to call a fighter in text: their snack name for bots, "You" for a
+ *  solo human, "P2" etc. on a shared couch. */
+export function playerName(p: Player): string {
+  return p.isAI ? p.char.name : game.numHumans <= 1 ? 'You' : humanLabel(p);
+}
+
 function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
   ctx.save();
   ctx.translate(x, y);

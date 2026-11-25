@@ -14,6 +14,7 @@ import { startMatch } from '../game/flow';
 import { computeAwards } from '../game/awards';
 import { drawArena } from './arena';
 import { drawWorld } from './world';
+import { playerName } from './hud';
 import type { Arena } from '../types';
 
 /** Menu system: title / match setup / how-to-play, pause overlay and the
@@ -529,6 +530,23 @@ function drawSetup(): void {
   ctx.textBaseline = 'alphabetic';
   ctx.fillText(['pits are lethal', 'pit edges nudge you back', 'pits become solid walls'][game.fallProtect], rx, 528);
 
+  // GHOSTS: the fallen haunt on · EFFECTS: Calm tames shake, flashes & camera
+  ctx.fillStyle = UI.dim;
+  ctx.font = fontB(12, 900);
+  ctx.fillText('GHOSTS', rx + 262, 470);
+  segmented(rx + 262, 480, 104, 26, ['On', 'Off'], game.ghosts ? 0 : 1, 'ghosts');
+  ctx.fillStyle = UI.dim;
+  ctx.font = fontB(12, 900);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('EFFECTS', rx + 382, 470);
+  segmented(rx + 382, 480, 110, 26, ['Full', 'Calm'], game.reduceFx ? 1 : 0, 'fx');
+  ctx.fillStyle = 'rgba(255,243,223,.45)';
+  ctx.font = fontB(11, 700);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(game.ghosts ? 'the fallen haunt the living' : 'dead means dead', rx + 262, 528);
+
   // Hide & Seek plays best with a full lobby — gentle hint
   if (game.mode === 3 && game.numPlayers < 4) {
     ctx.fillStyle = 'rgba(255,206,84,.75)';
@@ -538,6 +556,48 @@ function drawSetup(): void {
 
   btn(40, 572, 140, 52, 'BACK', 'back', { px: 20 });
   btn(W / 2 - 10, 568, 360, 58, 'START MATCH', 'start', { primary: true, px: 26 });
+  // couch joining: no menu-diving needed to add a friend
+  ctx.fillStyle = 'rgba(255,243,223,.5)';
+  ctx.font = fontB(11, 700);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('JOIN: press Ⓐ on a gamepad · V (WASD) · , (IJKL)      START: Enter / Options', W / 2 + 170, 638);
+}
+
+/**
+ * Drop-in joining on the setup screen: a throw press on any input device
+ * that isn't driving a fighter yet adds a local player on that device.
+ * `scheme` is a control-scheme id (see SCHEME_NAMES). Returns true if a
+ * player joined.
+ */
+export function joinWithScheme(scheme: number): boolean {
+  if (game.state !== 'menu' || game.menuPage !== 'setup') return false;
+  if (game.controlSchemes.slice(0, game.numHumans).includes(scheme)) return false;
+  if (game.numHumans >= 4) return false;
+  if (game.numHumans >= game.numPlayers) game.numPlayers = Math.min(6, game.numHumans + 1);
+  game.numHumans++;
+  const slot = game.numHumans - 1;
+  game.controlSchemes[slot] = scheme;
+  sanitizeControlSchemes();
+  charTab = slot;
+  audio.power();
+  saveSettings();
+  return true;
+}
+
+/** Keyboard / gamepad "confirm" on whatever screen is up. */
+export function menuConfirm(): void {
+  if (game.state === 'menu') {
+    audio.uiClick();
+    if (game.menuPage === 'title') game.menuPage = 'setup';
+    else if (game.menuPage === 'setup') {
+      saveSettings();
+      startMatch();
+    } else game.menuPage = 'title';
+  } else if (game.state === 'matchover') {
+    audio.uiClick();
+    startMatch();
+  }
 }
 
 /* ================================ HELP ==================================== */
@@ -560,9 +620,9 @@ function drawHelp(): void {
   const controls: [string, string][] = [
     ['WASD', 'Move'],
     ['MOUSE', 'Aim'],
-    ['LMB', 'Throw · charge & strafe to bank'],
-    ['RMB / E', 'Slash foes & parry boomerangs'],
-    ['SPACE', 'Dash'],
+    ['LMB', 'Throw · hold to curve it'],
+    ['RMB / E', 'Slash · parry · swat'],
+    ['SPACE', 'Dash · shove · leap pits'],
     ['SHIFT / F', 'Hop over danger'],
     ['ESC', 'Pause'],
     ['M', 'Mute'],
@@ -606,21 +666,22 @@ function drawHelp(): void {
   ctx.textBaseline = 'alphabetic';
   ctx.fillText('THE RULES OF THE BUFFET', 402, 112);
   const rules = [
-    ['One hit, one kill.', 'Boomerangs bounce off walls and come back to your hand.'],
-    ['Throwing leaves you unarmed.', 'No slashing until it returns — dash to survive. Up close, slash beats throw.'],
-    ['Parry!', 'Slash an incoming boomerang at the last moment to knock it straight back.'],
-    ['Dash is your escape.', 'It stomps out flames, leaps over pits, and dodges anything.'],
+    ['One hit, one kill.', 'Boomerangs curve, bounce off walls and come home to your hand.'],
+    ['Throwing leaves you unarmed.', "No slicing until it's back — but slash still SWATS throws away, and a dash still shoves."],
+    ['Parry into a rally!', 'Slash an incoming boomerang to bat it wherever you aim. Every parry makes it faster.'],
+    ['Dash is everything.', 'Dodge, leap pits, stomp out flames, break a shove — or barge a rival off the edge.'],
     ['Frozen solid?', 'Mash dash to shatter free — one bump and you break.'],
-    ['Work the arena.', 'Hide in bushes, stand on plates to open matching gates, mind the pistons.'],
+    ['Work the arena.', 'Bushes hide you (and burn), plates open gates, bumpers fire throws back out faster.'],
+    ["Dead isn't done.", 'Steer your ghost and press any action: a gust shoves the living and bends their throws.'],
   ];
   rules.forEach(([head, body], i) => {
-    const y = 138 + i * 46;
+    const y = 136 + i * 40;
     ctx.fillStyle = UI.gold;
-    ctx.font = fontB(14, 900);
+    ctx.font = fontB(13.5, 900);
     ctx.fillText(head, 402, y);
     ctx.fillStyle = 'rgba(255,243,223,.75)';
-    ctx.font = fontB(12.5, 700);
-    ctx.fillText(body, 402, y + 17);
+    ctx.font = fontB(12, 700);
+    ctx.fillText(body, 402, y + 16);
   });
 
   /* power glossary */
@@ -742,6 +803,12 @@ export function handleMenuClick(): void {
         break;
       case 'fall':
         game.fallProtect = clamp(parseInt(arg, 10), 0, 2);
+        break;
+      case 'ghosts':
+        game.ghosts = parseInt(arg, 10) === 0;
+        break;
+      case 'fx':
+        game.reduceFx = parseInt(arg, 10) === 1;
         break;
       case 'players-':
         game.numPlayers = clamp(game.numPlayers - 1, 2, 6);
@@ -956,14 +1023,14 @@ export function drawMatchOver(): void {
     // name + score
     ctx.font = fontB(13, 900);
     ctx.fillStyle = s.p!.isAI ? UI.cream : UI.gold;
-    ctx.fillText(s.p!.isAI ? s.p!.char.name : 'You', s.x, baseY + 16);
+    ctx.fillText(playerName(s.p!), s.x, baseY + 16);
     ctx.font = fontB(12, 700);
     ctx.fillStyle = 'rgba(255,243,223,.6)';
     ctx.fillText(game.mode === 2 ? `${s.p!.goldTime.toFixed(1)}s held` : `${s.p!.score} rounds · ${s.p!.stats.kills} KOs`, s.x, baseY + 34);
   }
 
   /* telemetry awards */
-  const awards = computeAwards().slice(0, 8);
+  const awards = computeAwards(8);
   if (awards.length) {
     ctx.fillStyle = UI.dim;
     ctx.font = fontB(13, 900);
@@ -993,7 +1060,7 @@ export function drawMatchOver(): void {
       ctx.fillText(aw.title, x + 48, y + 22);
       ctx.font = fontB(11, 700);
       ctx.fillStyle = 'rgba(255,243,223,.65)';
-      ctx.fillText((aw.player.isAI ? aw.player.char.name : 'You') + ' · ' + aw.detail, x + 48, y + 39);
+      ctx.fillText(playerName(aw.player) + ' · ' + aw.detail, x + 48, y + 39);
     });
   }
 
