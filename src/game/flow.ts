@@ -69,8 +69,10 @@ export function startRound(): void {
   game.switches = SWITCHES.map((s) => ({ x: s.x, y: s.y, r: s.r, gate: s.gate, pressed: false, on: [] }));
   game.gates = GATES.map((g) => ({ x: g.x, y: g.y, w: g.w, h: g.h, open: false }));
   game.bumpers = BUMPERS.map((b) => ({ x: b.x, y: b.y, r: b.r, flash: 0 }));
-  game.bushes = BUSHES.map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h, burnT: 0, burnt: false, by: null }));
+  game.bushes = BUSHES.map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h, burnT: 0, burnt: false, shake: 0, by: null }));
   game.feed = [];
+  game.finishing = false;
+  game.finishT = 0;
   game.showdown = false;
   game.showdownT = 0;
   game.cam.punch = 0;
@@ -101,7 +103,7 @@ export function startRound(): void {
   setupHideSeek();
   game.pickupTimer = 3.5;
   game.state = 'countdown';
-  game.countdownT = 2.2;
+  game.countdownT = 1.9;
   audio.music('game');
   audio.respawn(); // the whole roster popping back onto the field
 }
@@ -187,32 +189,35 @@ export function endRoundCheck(): void {
     return;
   }
 
-  // Team Up: the round ends once only one squad has members left standing.
-  if (game.mode === 1) {
-    const teams = new Set(alive.map((p) => p.team));
-    if (teams.size <= 1) {
-      game.roundWinner = alive[0] ?? null;
-      for (const p of alive) p.score++; // whole surviving squad scores
-      game.state = 'roundover';
-      game.roundoverT = 2.0;
-      if (game.roundWinner) audio.roundWin();
-      const champ = game.players.find((p) => p.score >= game.target);
-      if (champ) game.matchWinner = champ;
-    }
+  // Team Up / Free-for-all: once only one side is left standing the round is
+  // DECIDED — but not yet over. It plays out one more beat (in slow motion,
+  // see update.ts) before the result is called, and whatever is already in
+  // flight still counts: a boomerang on its way, a lit fuse, a ghost's last
+  // shove… The "winner" has to actually survive their victory.
+  const sides = game.mode === 1 ? new Set(alive.map((p) => p.team)).size : alive.length;
+  if (sides > 1) return;
+  if (!game.finishing) {
+    game.finishing = true;
+    game.finishT = FINISH_BEAT;
     return;
   }
-
-  // Free-for-all: last snack standing.
-  if (alive.length <= 1) {
-    game.roundWinner = alive.length === 1 ? alive[0] : null;
-    if (game.roundWinner) game.roundWinner.score++;
-    game.state = 'roundover';
-    game.roundoverT = 2.0;
-    if (game.roundWinner) audio.roundWin();
-    const champ = game.players.find((p) => p.score >= game.target);
-    if (champ) game.matchWinner = champ;
+  if (game.finishT > 0) return;
+  game.finishing = false;
+  game.roundWinner = alive[0] ?? null;
+  for (const p of alive) {
+    p.score++; // the whole surviving squad scores (or the last snack standing)
+    p.stats.roundsWon++;
+    if (p.stats.killsThisRound === 0 && game.players.length > 2) p.stats.pacifistWins++;
   }
+  game.state = 'roundover';
+  game.roundoverT = 1.7;
+  if (game.roundWinner) audio.roundWin();
+  const champ = game.players.find((p) => p.score >= game.target);
+  if (champ) game.matchWinner = champ;
 }
+
+/** Real seconds a decided round keeps playing before the result is called. */
+export const FINISH_BEAT = 1.15;
 
 /**
  * Dynamic economy: the more powers the most-buffed player holds, the less

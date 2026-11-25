@@ -1,6 +1,6 @@
 import { audio } from '../core/audio';
 import { clamp, dist, dist2, norm, TAU } from '../core/math';
-import { OBSTACLES, PITS, PORTALS, BUSHES } from '../data/arena';
+import { OBSTACLES, PITS, PORTALS } from '../data/arena';
 import { SLASH_RANGE, SLASH_HALF } from '../constants';
 import { POWERS } from '../data/powers';
 import { game } from '../game/state';
@@ -116,14 +116,22 @@ export function resolvePitSolids(o: { x: number; y: number; r: number }): void {
 export function nudgeFromPits(o: { x: number; y: number; vx: number; vy: number }, dt: number): void {
   const margin = 30;
   for (const P of PITS) {
-    const cx = P.x + P.w / 2;
-    const cy = P.y + P.h / 2;
     if (o.x > P.x - margin && o.x < P.x + P.w + margin && o.y > P.y - margin && o.y < P.y + P.h + margin) {
-      const [nx, ny] = norm(o.x - cx, o.y - cy);
+      const [nx, ny] = pitNormal(P, o.x, o.y);
       o.vx += nx * 900 * dt;
       o.vy += ny * 900 * dt;
     }
   }
+}
+
+/** The direction straight away from a pit's nearest edge (falls back to
+ *  away-from-centre for a point already inside it). Long, thin chasms need
+ *  this: "away from the centre" would shove you ALONG the lip, not off it. */
+export function pitNormal(P: Rect, x: number, y: number): [number, number] {
+  const dx = x - clamp(x, P.x, P.x + P.w);
+  const dy = y - clamp(y, P.y, P.y + P.h);
+  if (dx || dy) return norm(dx, dy);
+  return norm(x - (P.x + P.w / 2), y - (P.y + P.h / 2));
 }
 
 /** Is a point inside any bottomless pit? (boomerangs fly over, so only the
@@ -179,10 +187,11 @@ export function resolveBumpers(p: Player): boolean {
   return bounced;
 }
 
-/** Is a point inside leafy cover? (hides a fighter from bots; feeds "Rambo".) */
+/** Is a point inside leafy cover? (hides a fighter from bots; feeds "Rambo".)
+ *  Bushes that have burnt down hide nobody. */
 export function inBush(x: number, y: number): boolean {
-  for (const B of BUSHES) {
-    if (x > B.x && x < B.x + B.w && y > B.y && y < B.y + B.h) return true;
+  for (const B of game.bushes) {
+    if (!B.burnt && x > B.x && x < B.x + B.w && y > B.y && y < B.y + B.h) return true;
   }
   return false;
 }

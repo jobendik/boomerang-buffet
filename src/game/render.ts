@@ -11,7 +11,9 @@ import { fontD, pill, UI } from '../ui/widgets';
 
 /** Custom crosshair drawn at the mouse while the match runs. */
 function drawReticle(): void {
-  const me = game.players.find((p) => !p.isAI);
+  const slot = game.controlSchemes.slice(0, game.numHumans).indexOf(0);
+  if (slot < 0) return; // nobody is on the mouse
+  const me = game.players[slot];
   const col = me && me.alive ? me.char.body : 'rgba(255,243,223,.8)';
   const charge = me && me.alive ? me.charge : 0;
   ctx.save();
@@ -47,9 +49,10 @@ function drawReticle(): void {
 /** Top-level frame renderer: dispatches per game phase + screen shake. */
 export function render(): void {
   ctx.clearRect(0, 0, W, H);
-  // shake
+  // shake (toned right down under Reduced Effects)
   ctx.save();
-  if (game.shake > 0.2 && !game.paused) ctx.translate(rand(-1, 1) * game.shake, rand(-1, 1) * game.shake);
+  const shake = game.shake * (game.reduceFx ? 0.25 : 1);
+  if (shake > 0.2 && !game.paused) ctx.translate(rand(-1, 1) * shake, rand(-1, 1) * shake);
 
   if (game.state === 'menu') {
     drawMenu();
@@ -62,13 +65,34 @@ export function render(): void {
     return;
   }
 
+  // the world, through the presentation camera: a directional kick on heavy
+  // blows and a push-in on the finishing one (the HUD stays put above it)
+  const cam = game.cam;
+  ctx.save();
+  if (!game.paused) ctx.translate(cam.kx, cam.ky);
+  if (cam.zoom > 1.002) {
+    ctx.translate(cam.focusX, cam.focusY);
+    ctx.scale(cam.zoom, cam.zoom);
+    ctx.translate(-cam.focusX, -cam.focusY);
+  }
   drawWorld();
+  ctx.restore();
   // blink of blast light over the field (HUD stays crisp above it)
   if (game.flash > 0) {
-    ctx.fillStyle = `rgba(255,240,214,${(game.flash / 0.14) * 0.26})`;
+    ctx.fillStyle = `rgba(255,240,214,${(game.flash / 0.14) * (game.reduceFx ? 0.08 : 0.26)})`;
     ctx.fillRect(0, 0, W, H);
   }
+  // the finishing beat gets cinema bars
+  const bars = clamp((cam.zoom - 1) / 0.2, 0, 1);
+  if (bars > 0.01) {
+    ctx.fillStyle = '#0a0612';
+    ctx.fillRect(0, 0, W, 34 * bars);
+    ctx.fillRect(0, H - 34 * bars, W, 34 * bars);
+  }
+  ctx.save();
+  ctx.globalAlpha = 1 - bars * 0.85;
   drawHUD();
+  ctx.restore();
 
   if (game.state === 'countdown') {
     // arena intro: name + flavour while the clock winds down
@@ -110,6 +134,32 @@ export function render(): void {
     ctx.restore();
   }
 
+  // "SHOWDOWN!" — a quick banner slam when the brawl is down to two
+  if (game.state === 'playing' && game.showdownT > 0) {
+    const k = 1 - game.showdownT / 1.8;
+    const inK = clamp(k / 0.12, 0, 1);
+    const outK = clamp((1 - k) / 0.25, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = Math.min(inK, outK);
+    ctx.translate(W / 2 + (1 - inK) * -160, 118);
+    ctx.rotate(-0.04);
+    ctx.fillStyle = 'rgba(13,8,22,.8)';
+    ctx.fillRect(-W, -24, W * 2, 46);
+    ctx.fillStyle = UI.red;
+    ctx.fillRect(-W, -27, W * 2, 3);
+    ctx.fillRect(-W, 22, W * 2, 3);
+    ctx.font = fontD(34);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 6;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = UI.ink;
+    ctx.strokeText('SHOWDOWN!', 0, 1);
+    ctx.fillStyle = UI.gold;
+    ctx.fillText('SHOWDOWN!', 0, 1);
+    ctx.restore();
+  }
+
   // Hide & Seek: the seeker's view is blacked out while the hiders scatter
   if (game.state === 'playing' && game.mode === 3 && game.hsSetup > 0) {
     ctx.fillStyle = 'rgba(8,5,12,.97)';
@@ -135,13 +185,13 @@ export function render(): void {
       const seekerWon = !!game.roundWinner && game.roundWinner.role === 'seeker';
       drawCenterText(seekerWon ? 'SEEKER WINS!' : 'HIDERS WIN!', null, seekerWon ? '#ff7ad0' : UI.green);
     } else if (game.roundWinner) {
-      drawCenterText(
-        (game.roundWinner.isAI ? game.roundWinner.char.name : 'YOU') + (game.roundWinner.isAI ? ' SCORES!' : ' SCORE!'),
-        null,
-        game.roundWinner.char.body
-      );
+      const rw = game.roundWinner;
+      const who = rw.isAI ? rw.char.name.toUpperCase() : game.numHumans <= 1 ? 'YOU' : `P${game.players.indexOf(rw) + 1}`;
+      const team = game.mode === 1 ? (rw.team === 0 ? 'BLUE TEAM' : 'PINK TEAM') : null;
+      drawCenterText(team ? `${team} SCORES!` : who + (who === 'YOU' ? ' SCORE!' : ' SCORES!'), null, rw.char.body);
     } else {
-      drawCenterText('DRAW!', null, UI.dim);
+      // nobody survived their own victory lap
+      drawCenterText('DOUBLE KO!', 'nobody scores', UI.dim);
     }
     // current standings, so the race to the target is always legible
     if (game.mode !== 2) drawStandings(H / 2 + 92);
@@ -150,7 +200,10 @@ export function render(): void {
 
   // custom crosshair replaces the OS cursor during the action
   const inAction = (game.state === 'playing' || game.state === 'countdown') && !game.paused;
-  if (inAction) drawReticle();
+  if (inAction) {
+    // the reticle lives in world space, so follow the camera to stay under the pointer
+    drawReticle();
+  }
   canvas.style.cursor = inAction ? 'none' : 'default';
 
   if (game.paused) drawPause();

@@ -7,6 +7,7 @@ import { drawBoomShape } from '../gfx/shapes';
 import { blastKnock, circleRect, resolvePortals, shotTag } from '../systems/collision';
 import { spawnDecal, spawnExplosion, spawnPopText, spawnRing } from '../systems/effects';
 import { game } from '../game/state';
+import { igniteBushAt } from '../systems/bushes';
 import { FirePatch } from './FirePatch';
 import { Particle } from './Particle';
 import type { Player } from './Player';
@@ -303,6 +304,11 @@ export class Boomerang {
       audio.bounce(); // ricochet knock (the engine's retrigger gap tames barrages)
     }
 
+    // a wound-up rally throw sheds embers
+    if (this.rally > 0 && Math.random() < 0.35 + this.rally * 0.15) {
+      game.particles.push(new Particle(this.x + rand(-4, 4), this.y + rand(-4, 4), rand(-40, 40), rand(-40, 40), rand(0.15, 0.35), this.rally >= 3 ? '#fff' : '#ffce54', rand(1.5, 3)));
+    }
+
     // teleporters carry boomerangs through too (velocity preserved)
     if (resolvePortals(this, dt)) this.portals++;
 
@@ -397,8 +403,12 @@ export class Boomerang {
       }
     }
 
-    // the shockwave hurls survivors (and passing boomerangs) outward
-    if (!icy) blastKnock(this.x, this.y, R, this.origOwner);
+    // the shockwave hurls survivors (and passing boomerangs) outward, and a
+    // blast next to the shrubbery sets it alight
+    if (!icy) {
+      blastKnock(this.x, this.y, R, this.origOwner);
+      igniteBushAt(this.x, this.y, this.origOwner, R * 0.7);
+    }
 
     if (this.isMain) this.origOwner.loseBoomerang();
   }
@@ -423,7 +433,55 @@ export class Boomerang {
       ctx.stroke();
       ctx.restore();
     }
-    // trail
+    const s = this.big ? 16 : this.transient && !this.rally ? 9 : 11;
+    // a rally winds the boomerang up — and it shows: owner's colour gives way
+    // to gold, then orange, then white-hot
+    const heat = RALLY_HEAT[Math.min(RALLY_HEAT.length - 1, this.rally)];
+    const col = this.bounceFlash > 0 ? '#fff' : heat ?? this.origOwner.char.body;
+
+    // a little shadow on the floor sells that it's flying above it
+    ctx.fillStyle = 'rgba(0,0,0,.2)';
+    ctx.beginPath();
+    ctx.ellipse(this.x + 2, this.y + 13, s * 0.85, s * 0.34, 0, 0, TAU);
+    ctx.fill();
+
+    // motion ribbon: a tapered blade swept through the recent flight path
+    const n = this.trail.length;
+    if (n > 2) {
+      ctx.save();
+      const pts = [...this.trail, [this.x, this.y]];
+      const side = (sign: number, wMul: number): void => {
+        for (let i = sign > 0 ? 0 : pts.length - 1; sign > 0 ? i < pts.length : i >= 0; i += sign) {
+          const a = pts[Math.max(0, i - 1)];
+          const b = pts[Math.min(pts.length - 1, i + 1)];
+          const dx = b[0] - a[0];
+          const dy = b[1] - a[1];
+          const l = Math.hypot(dx, dy) || 1;
+          const w = (i / (pts.length - 1)) * s * wMul * sign;
+          ctx.lineTo(pts[i][0] - (dy / l) * w, pts[i][1] + (dx / l) * w);
+        }
+      };
+      ctx.fillStyle = col;
+      ctx.globalAlpha = 0.34;
+      ctx.beginPath();
+      side(1, 0.62);
+      side(-1, 0.62);
+      ctx.closePath();
+      ctx.fill();
+      // a bright core once it's really moving
+      if (this.rally || Math.hypot(this.vx, this.vy) > 600) {
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        side(1, 0.22);
+        side(-1, 0.22);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // elemental dressing
     if (this.fire) {
       const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.hitR + 10);
       g.addColorStop(0, 'rgba(255,200,60,.9)');
@@ -445,33 +503,55 @@ export class Boomerang {
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.hitR + 2, 0, TAU);
       ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.25)';
+      ctx.beginPath();
+      ctx.arc(this.x - 4, this.y - 5, 3.2, 0, TAU);
+      ctx.fill();
       const blink = Math.floor(game.time * 12) % 2;
       ctx.fillStyle = this.ice ? (blink ? '#dff6ff' : '#7ad0ff') : blink ? '#ffd23a' : '#ff7b3a';
       ctx.beginPath();
       ctx.arc(this.x, this.y, 4, 0, TAU);
       ctx.fill();
-      return;
-    }
-    const s = this.big ? 16 : this.transient ? 9 : 11;
-    const col = this.bounceFlash > 0 ? '#fff' : this.origOwner.char.body;
-    // motion-blur ribbon: a tapered streak swept through the recent flight path
-    if (this.trail.length > 2) {
-      ctx.save();
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      for (let i = 1; i < this.trail.length; i++) {
-        const k = i / this.trail.length;
-        ctx.strokeStyle = col;
-        ctx.globalAlpha = k * 0.3;
-        ctx.lineWidth = s * 0.9 * k;
+      // a batted bomb wears its rally heat as a ring, so the stakes are plain
+      if (heat) {
+        ctx.strokeStyle = heat;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(this.trail[i - 1][0], this.trail[i - 1][1]);
-        ctx.lineTo(this.trail[i][0], this.trail[i][1]);
+        ctx.arc(this.x, this.y, this.hitR + 5, 0, TAU);
         ctx.stroke();
       }
-      ctx.restore();
+    } else {
+      // UNSTOPPABLE throws carry a hard red edge: "don't even try"
+      if (this.unstoppable) {
+        ctx.strokeStyle = 'rgba(255,77,122,.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, s + 5, this.rot, this.rot + 4.4);
+        ctx.stroke();
+      }
+      drawBoomShape(this.x, this.y, s * (1 + Math.min(0.3, this.rally * 0.08)), this.rot, col, true);
     }
-    ctx.globalAlpha = 1;
-    drawBoomShape(this.x, this.y, s, this.rot, col, true);
+
+    // additive bloom: every boomerang is a small light source
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const gr = s * (2.3 + Math.min(1.6, this.rally * 0.45));
+    const g = ctx.createRadialGradient(this.x, this.y, 1, this.x, this.y, gr);
+    g.addColorStop(0, hexA(col, this.rally ? 0.5 : 0.3));
+    g.addColorStop(1, hexA(col, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, gr, 0, TAU);
+    ctx.fill();
+    ctx.restore();
   }
+}
+
+/** Trail/body colour by rally count (index 0 = not in a rally → owner's colour). */
+const RALLY_HEAT: (string | null)[] = [null, '#ffe08a', '#ffb347', '#ff7b3a', '#ffffff'];
+
+/** '#rrggbb' → 'rgba(r,g,b,a)'. */
+function hexA(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }

@@ -18,4 +18,12 @@ if ('fonts' in document) {
   document.fonts.load('700 20px "Nunito Variable"');
 }
 
+// Dev-only handle for poking at the running game from the console (and for
+// the browser-driven checks in .claude/skills/verify). Stripped from builds.
+if (import.meta.env.DEV) {
+  void Promise.all([import('./game/state'), import('./game/flow'), import('./data/arena')]).then(([st, flow, ar]) => {
+    (window as unknown as Record<string, unknown>).__bb = { game: st.game, tele: st.tele, startMatch: flow.startMatch, startRound: flow.startRound, ARENAS: ar.ARENAS };
+  });
+}
+
 startGame();

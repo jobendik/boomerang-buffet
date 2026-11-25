@@ -151,6 +151,7 @@ export interface BushState {
   h: number;
   burnT: number; // > 0 while burning
   burnt: boolean; // reduced to a charred stump — no cover left
+  shake: number; // 1 → 0 rustle when something moves through the leaves
   by: Player | null; // who lit it (owns the flames it spits)
 }
 
@@ -171,9 +172,12 @@ export interface GameState {
   bushes: BushState[]; // live (burnable) bushes for the current arena
   feed: FeedItem[]; // recent kills, newest last
   cam: Camera;
+  finishing: boolean; // the round is decided — playing out its last beat in slow-mo
+  finishT: number; // real seconds left of that beat before the result is called
   showdown: boolean; // the round has come down to its final two
   showdownT: number; // remaining life of the "SHOWDOWN!" splash
   reduceFx: boolean; // accessibility: tone down shake, flashes and camera moves
+  ghosts: boolean; // fallen fighters haunt the rest of the round
   decals: Decal[]; // fading floor marks (scorches, frost)
   toasts: Toast[]; // power-pickup notices for the human player
   raining: boolean; // weather: douses fire on contact (pit-free maps only)
@@ -238,9 +242,12 @@ export const game: GameState = {
   bushes: [],
   feed: [],
   cam: { kx: 0, ky: 0, focusX: 512, focusY: 320, punch: 0, zoom: 1 },
+  finishing: false,
+  finishT: 0,
   showdown: false,
   showdownT: 0,
   reduceFx: false,
+  ghosts: true,
   decals: [],
   toasts: [],
   raining: false,
@@ -357,7 +364,7 @@ export function sanitizeCharSel(maxIdx: number): void {
 
 const SAVE_KEY = 'boomerang-buffet-settings-v1';
 const SAVED_NUMBER_FIELDS = ['numPlayers', 'numHumans', 'difficulty', 'target', 'arenaSel', 'mode', 'fallProtect'] as const;
-const SAVED_BOOL_FIELDS = ['reduceFx'] as const;
+const SAVED_BOOL_FIELDS = ['reduceFx', 'ghosts'] as const;
 const SAVED_ARRAY_FIELDS = ['charSel', 'controlSchemes'] as const;
 
 /** Persist the menu selections so a returning player keeps their setup. */

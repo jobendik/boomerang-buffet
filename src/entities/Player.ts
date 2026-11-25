@@ -2,18 +2,18 @@ import { ctx } from '../core/canvas';
 import { audio } from '../core/audio';
 import { clamp, dist, lerp, norm, rand, TAU } from '../core/math';
 import { BOUNDS, SLASH_RANGE, SLASH_HALF } from '../constants';
-import { CHARS, PERSONAS } from '../data/characters';
+import { CHARS, PERSONAS, setFace, type Mood } from '../data/characters';
 import { arena, OBSTACLES, SPAWNS } from '../data/arena';
 import { POWERS, EXCLUSIVE_GROUPS, type PowerKey } from '../data/powers';
 import { drawBoomShape, drawProp, roundRectPath } from '../gfx/shapes';
 import { circleRect, resolveCircleObstacles, resolveCrushers, resolveGates, resolvePortals, inPit, nearPit, resolvePitSolids, nudgeFromPits, inBush, blastKnock, resolveBumpers } from '../systems/collision';
 import { spawnConfetti, spawnDashPuff, spawnExplosion, spawnFootDust, spawnPopText, spawnRing, spawnSlice } from '../systems/effects';
-import { game, kick, pushFeed, roundDecidedBy } from '../game/state';
+import { game, kick, pushFeed, roundDecidedBy, tally } from '../game/state';
 import { Boomerang } from './Boomerang';
 import { Particle } from './Particle';
 import { FirePatch } from './FirePatch';
 import { IcePatch } from './IcePatch';
-import type { Char, Intents, Spawn, Vec2 } from '../types';
+import type { Char, Intents, Rect, Spawn, Vec2 } from '../types';
 
 /* ----------------------------- tuning constants -------------------------- */
 const SLASH_ACTIVE = 0.12; // seconds the blade is "live"
@@ -31,6 +31,11 @@ const SWAT_CD = 0.6; // recovery after a bare-handed (unarmed) swat
 const GRIP_GO = 0.0005; // velocity convergence base while pushing off (smaller = snappier)
 const GRIP_STOP = 0.00006; // …and while braking to a stop
 const STAGGER_CONTROL = 0.16; // share of normal steering kept while knocked off balance
+const VIS = 1.16; // fighters are drawn this much larger than their collision circle
+const GHOST_REACH = 78; // radius of a ghost's gust
+const GHOST_CD = 3.2; // seconds between gusts
+/** Overhead marker tints for local humans P1–P4 (distinct from any fighter's palette). */
+export const HUMAN_TINTS = ['#ffd23a', '#5ad1ff', '#ff7ad0', '#8affd6'];
 export const SHOVE_SPEED = 520; // knock-back launch speed of a dash tackle
 export const SHOVE_STAGGER = 0.42; // seconds a tackled fighter slides before regaining footing
 
@@ -172,6 +177,7 @@ export class Player {
   bob!: number;
   shieldFlash!: number;
   moveK!: number; // 0 idle … 1 running, smoothed (drives the walk wobble)
+  walkPh!: number; // walk-cycle phase, advanced by ground actually covered
   dustT!: number; // footstep dust cadence
   ghostT!: number; // dash afterimage cadence
   streak!: number; // kills chained inside the streak window
@@ -308,6 +314,7 @@ export class Player {
     this.bob = rand(0, TAU);
     this.shieldFlash = 0;
     this.moveK = 0;
+    this.walkPh = rand(0, TAU);
     this.dustT = 0;
     this.ghostT = 0;
     this.streak = 0;
@@ -582,6 +589,7 @@ export class Player {
     // walk-cycle blend + footstep dust while running on the ground
     const runSpeed = Math.hypot(this.vx, this.vy);
     this.moveK = lerp(this.moveK, runSpeed > 60 ? 1 : 0, 1 - Math.pow(0.001, dt));
+    this.walkPh += runSpeed * dt * 0.085;
     if (this.squashT > 0) this.squashT = Math.max(0, this.squashT - dt);
     this.dustT -= dt;
     if (runSpeed > 170 && !this.airborne && this.dashT <= 0 && this.dustT <= 0) {
@@ -816,6 +824,51 @@ export class Player {
     } else {
       this.disguised = false;
       this.disguiseT = 0;
+    }
+  }
+
+  /**
+   * Life after death. A fallen fighter drifts on as a ghost its player still
+   * steers (through walls, pits, anything) and — every few seconds — can let
+   * out a GUST: the living nearby are shoved a short way and passing
+   * boomerangs are puffed off line. It can't kill by itself… but a nudge at
+   * a pit's edge is a nudge at a pit's edge. Losing the round doesn't mean
+   * leaving it.
+   */
+  updateGhost(dt: number, intents: Intents): void {
+    this.booCd = Math.max(0, this.booCd - dt);
+    this.booT = Math.max(0, this.booT - dt);
+    const [mx, my] = intents.move;
+    const [nx, ny] = mx || my ? norm(mx, my) : [0, 0];
+    const k = 1 - Math.pow(0.01, dt);
+    this.gvx = lerp(this.gvx, nx * 210, k);
+    this.gvy = lerp(this.gvy, ny * 210, k);
+    this.gx = clamp(this.gx + this.gvx * dt, BOUNDS.l + 10, BOUNDS.r - 10);
+    this.gy = clamp(this.gy + this.gvy * dt, BOUNDS.t + 10, BOUNDS.b - 10);
+    if (this.booCd > 0 || !(intents.dash || intents.slash || intents.throwHeld || intents.throwNow)) return;
+    this.booCd = GHOST_CD;
+    this.booT = 0.3;
+    this.stats.haunts++;
+    tally('boo');
+    audio.boo();
+    spawnRing(this.gx, this.gy, '#e8e2ff', 1.3);
+    for (const q of game.players) {
+      if (!q.alive || q.airborne || q.invuln > 0 || q.frozen > 0 || !this.isEnemy(q)) continue;
+      const d = dist(this.gx, this.gy, q.x, q.y);
+      if (d < GHOST_REACH + q.r) {
+        q.knock(q.x - this.gx || 1, q.y - this.gy, 310, 0.3, this);
+        q.flinchT = 0.8;
+        spawnPopText(q.x, q.y - q.r - 8, 'BOO!', '#e8e2ff', 15);
+      }
+    }
+    for (const b of game.boomerangs) {
+      if (b.dead || !b.origOwner.isEnemy(this)) continue;
+      const d = dist(this.gx, this.gy, b.x, b.y);
+      if (d < GHOST_REACH && d > 1) {
+        b.vx += ((b.x - this.gx) / d) * 240;
+        b.vy += ((b.y - this.gy) / d) * 240;
+        b.noteClash(null);
+      }
     }
   }
 
@@ -1087,6 +1140,7 @@ export class Player {
     // the kill feed and style points toward the end-of-match awards
     let tag = o.tag;
     if (killer && killer !== this && !killer.alive && !tag) tag = 'FROM THE GRAVE!';
+    else if (killer && !killer.alive && this.lastHitBy === killer && (tag === 'DUNKED!' || tag === 'PANCAKED!' || tag === 'ROASTED!')) tag = 'HAUNTED!';
     if (tag && killer && killer !== this) {
       killer.stats.trickKills++;
       killer.stats.style += o.style ?? 1;
@@ -1146,8 +1200,52 @@ export class Player {
   }
 
   /* ---- rendering ---- */
+
+  /** What this fighter is feeling right now — poses the shared face rig. */
+  private mood(): Mood {
+    if (this.frozen > 0) return 'frozen';
+    if (this.burning > 0 || this.dyingTimer > 0) return 'panic';
+    if (this.stagger > 0 || this.bamboozled > 0) return 'dizzy';
+    if (this.dashT > 0 || this.airT > 0) return 'effort';
+    if (this.slashT > 0 || this.throwT > 0.08) return 'focus';
+    if (this.flinchT > 0 || this.threat()) return 'scared';
+    if (this.cheerT > 0.5) return 'happy';
+    if (this.cheerT > 0) return 'smug';
+    if ((this.charging && this.charge > 0.25) || (this.isAI && this.ai.meleeT > 0)) return 'focus';
+    if (this.chilled > 0) return 'sad';
+    if (this.isGoldCarrier) return 'happy';
+    return 'idle';
+  }
+
+  /** Is a rival's boomerang bearing down on us right now? (face only) */
+  private threat(): boolean {
+    for (const b of game.boomerangs) {
+      if (b.dead || !b.origOwner.isEnemy(this)) continue;
+      const dx = this.x - b.x;
+      const dy = this.y - b.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 150 || d < 1) continue;
+      if ((b.vx * dx + b.vy * dy) / (d * (Math.hypot(b.vx, b.vy) || 1)) > 0.55) return true;
+    }
+    return false;
+  }
+
+  /** A floating mitten. */
+  private drawHand(x: number, y: number, s = 1): void {
+    ctx.fillStyle = this.char.dark;
+    ctx.strokeStyle = 'rgba(20,12,32,.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 4.4 * s, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+  }
+
   draw(): void {
-    if (!this.alive) return;
+    if (!this.alive) {
+      this.drawGhost();
+      return;
+    }
 
     // DISGUISE: render as inert scenery, hiding all the usual fighter tells.
     // The human keeps a faint coloured pulse so they can still find themselves.
@@ -1167,48 +1265,94 @@ export class Player {
       return;
     }
 
-    const bobY = Math.sin(this.bob) * 1.8;
-    // shadow — stays grounded but shrinks & fades as the fighter hops upward
+    // drawn a little larger than the hitbox: chunkier, more readable
+    // fighters, and near-misses that look like near-misses
+    const r = this.r * VIS;
+    const speed = Math.hypot(this.vx, this.vy);
+    const bobY = Math.sin(this.bob) * 1.8 * (1 - this.moveK * 0.5);
     const zk = this.jumpZ / JUMP_H; // 0 grounded … 1 at apex
-    ctx.fillStyle = `rgba(0,0,0,${0.28 - zk * 0.16})`;
+    const baseA = 1; // (a bush's canopy is drawn over us — it does the hiding)
+    const flick = this.invuln > 0 && this.airT <= 0 && this.dashT <= 0 && Math.floor(game.time * 20) % 2 === 0 ? 0.55 : 1;
+    const by = this.y + bobY - this.jumpZ; // body centre on screen
+
+    // shadow — stays grounded but shrinks & fades as the fighter hops upward
+    ctx.fillStyle = `rgba(0,0,0,${0.3 - zk * 0.16})`;
     ctx.beginPath();
-    ctx.ellipse(this.x, this.y + this.r * 0.95, this.r * 0.9 * (1 - zk * 0.4), this.r * 0.42 * (1 - zk * 0.4), 0, 0, TAU);
+    ctx.ellipse(this.x, this.y + r * 1.02, r * 0.95 * (1 - zk * 0.4), r * 0.4 * (1 - zk * 0.4), 0, 0, TAU);
     ctx.fill();
-
-    ctx.save();
-    ctx.translate(this.x, this.y + bobY - this.jumpZ);
-
-    // body language: spawn pop-in, dash/land squash, and a jaunty run wobble
-    const grow = 1 - this.spawnFlash / 0.6; // 0 just spawned … 1 settled
-    const popScale = Math.min(1, 0.4 + grow * 0.6) + Math.sin(Math.min(1, grow) * Math.PI) * 0.14;
-    const sq = this.squashT > 0 ? this.squashT / 0.18 : 0;
-    ctx.rotate(Math.sin(this.bob * 1.35) * 0.055 * this.moveK);
-    ctx.scale(popScale * (1 + sq * 0.16), popScale * (1 - sq * 0.18));
-
-    // wind-up body language: lean back while charging a throw, and tremble
-    // with barely-contained power once the charge is full
-    if (this.charging && this.charge > 0.1) {
-      ctx.translate(-this.aim[0] * this.charge * 3, -this.aim[1] * this.charge * 3);
-      ctx.rotate(-this.aim[0] * this.charge * 0.06);
-      if (this.charge >= 1) ctx.translate(rand(-0.8, 0.8), rand(-0.8, 0.8));
-    }
-    // frozen solid: shivering inside the ice block
-    if (this.frozen > 0) ctx.translate(Math.sin(game.time * 38) * 1.1, 0);
 
     // stacked power auras (one faint ring per active modifier)
     let ringIdx = 0;
     for (const key of this.powers) {
-      const p = POWERS[key];
-      ctx.save();
-      ctx.globalAlpha = 0.3 + 0.14 * Math.sin(game.time * 6 + ringIdx);
-      ctx.strokeStyle = p.color;
-      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = (0.26 + 0.12 * Math.sin(game.time * 6 + ringIdx)) * baseA;
+      ctx.strokeStyle = POWERS[key].color;
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(0, 0, this.r + 7 + ringIdx * 3.5, 0, TAU);
+      ctx.arc(this.x, by, r + 7 + ringIdx * 3.2, 0, TAU);
       ctx.stroke();
-      ctx.restore();
       ringIdx++;
     }
+    ctx.globalAlpha = 1;
+
+    // little feet: a walk cycle driven by ground actually covered, tucked up
+    // mid-hop, splayed while sliding from a shove
+    if (this.frozen <= 0) {
+      const [mvx, mvy] = speed > 20 ? [this.vx / speed, this.vy / speed] : [0, 0];
+      ctx.globalAlpha = baseA * flick;
+      for (const side of [-1, 1]) {
+        const ph = this.walkPh + (side > 0 ? Math.PI : 0);
+        const stride = Math.sin(ph) * 4.2 * this.moveK;
+        const lift = Math.max(0, Math.cos(ph)) * 3.2 * this.moveK;
+        let fx = this.x + side * r * 0.42 + mvx * stride;
+        let fy = this.y + r * 0.94 + mvy * stride * 0.6 - lift - this.jumpZ * 0.82;
+        if (this.stagger > 0) fx += side * 3;
+        if (this.airT > 0) fy -= 2;
+        ctx.fillStyle = '#2a1c33';
+        ctx.beginPath();
+        ctx.ellipse(fx, fy, 4.6, 3.1, 0, 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.save();
+    ctx.translate(this.x, by);
+
+    // body language: spawn pop-in, squash & stretch, a lean into the run
+    const grow = 1 - this.spawnFlash / 0.6; // 0 just spawned … 1 settled
+    const popScale = (Math.min(1, 0.4 + grow * 0.6) + Math.sin(Math.min(1, grow) * Math.PI) * 0.14) * (1 + zk * 0.12);
+    const sq = this.squashT > 0 ? this.squashT / 0.18 : 0;
+    if (this.dashT > 0 && speed > 80) {
+      // a dash smears the body along its line of travel
+      const va = Math.atan2(this.vy, this.vx);
+      ctx.rotate(va);
+      ctx.scale(1.28, 0.8);
+      ctx.rotate(-va);
+    } else if (this.stagger > 0) {
+      ctx.rotate(Math.sin(game.time * 30) * 0.22); // reeling
+    } else {
+      ctx.rotate(clamp(this.vx / 260, -1, 1) * 0.11 * this.moveK + Math.sin(this.walkPh) * 0.045 * this.moveK);
+    }
+    // an idle fighter breathes; a running one bounces on its stride
+    const breathe = 1 + Math.sin(this.bob * 0.5) * 0.02 * (1 - this.moveK);
+    const stridePop = Math.abs(Math.sin(this.walkPh)) * 0.05 * this.moveK;
+    ctx.scale(popScale * (1 + sq * 0.16) * (2 - breathe), popScale * (1 - sq * 0.18) * breathe * (1 + stridePop));
+
+    // wind-up body language: lean back while charging a throw, and tremble
+    // with barely-contained power once the charge is full
+    if (this.charging && this.charge > 0.1) {
+      ctx.translate(-this.aim[0] * this.charge * 3.5, -this.aim[1] * this.charge * 3.5);
+      ctx.rotate(-this.aim[0] * this.charge * 0.09);
+      if (this.charge >= 1) ctx.translate(rand(-0.9, 0.9), rand(-0.9, 0.9));
+    }
+    // the follow-through: the whole body lunges after the throw for a beat
+    if (this.throwT > 0) {
+      const k = this.throwT / 0.22;
+      ctx.translate(this.aim[0] * k * 4, this.aim[1] * k * 4);
+    }
+    // frozen solid: shivering inside the ice block
+    if (this.frozen > 0) ctx.translate(Math.sin(game.time * 38) * 1.1, 0);
+
     // shield pop flash
     if (this.shieldFlash > 0) {
       ctx.save();
@@ -1216,157 +1360,329 @@ export class Player {
       ctx.strokeStyle = POWERS.SHIELD.color;
       ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(0, 0, this.r + 12, 0, TAU);
+      ctx.arc(0, 0, r + 12, 0, TAU);
       ctx.stroke();
       ctx.restore();
     }
-    // invuln flicker (suppressed mid-hop — the raised sprite reads as airborne)
-    if (this.invuln > 0 && this.airT <= 0 && Math.floor(game.time * 20) % 2 === 0) ctx.globalAlpha = 0.55;
-    // lurking in foliage fades the fighter into the leaves
-    if (this.inBush) ctx.globalAlpha *= 0.45;
-
-    this.char.draw(this.char, this.r, this.aim);
-
-    // melee swing: the boomerang itself sweeps across the slash arc like a
-    // knife — wind-up edge to follow-through — trailing a fading swoosh
-    if (this.slashT > 0) {
-      const a = Math.atan2(this.aim[1], this.aim[0]);
-      const k = 1 - this.slashT / SLASH_ACTIVE; // 0 wind-up → 1 follow-through
-      const fade = this.slashT / SLASH_ACTIVE;
-      const sweep = SLASH_HALF * 1.5;
-      const start = a - this.swingDir * sweep;
-      const blade = start + this.swingDir * sweep * 2 * k; // blade's current angle
-      const rad = this.r + SLASH_RANGE * 0.7;
+    // a held SHIELD is a visible soap-bubble, not just an icon in the HUD
+    if (this.powers.has('SHIELD')) {
       ctx.save();
-      ctx.lineCap = 'round';
-      // the swoosh swept out so far, brightest along the blade's wake
-      ctx.strokeStyle = `rgba(255,255,255,${0.8 * fade})`;
-      ctx.lineWidth = 6;
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = POWERS.SHIELD.color;
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(0, 0, rad, start, blade, this.swingDir < 0);
+      ctx.arc(0, 0, r + 5, 0, TAU);
       ctx.stroke();
-      ctx.strokeStyle = `rgba(180,240,255,${0.45 * fade})`;
-      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.35;
       ctx.beginPath();
-      ctx.arc(0, 0, rad + 4, start, blade, this.swingDir < 0);
+      ctx.arc(0, 0, r + 5, -2.2 + Math.sin(game.time * 2) * 0.3, -1.4 + Math.sin(game.time * 2) * 0.3);
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = '#fff';
       ctx.stroke();
-      // the blade: our own boomerang, spinning hard as it's swung through
-      drawBoomShape(Math.cos(blade) * rad, Math.sin(blade) * rad, 10, blade + k * 9, this.char.dark);
       ctx.restore();
     }
+    ctx.globalAlpha = baseA * flick;
+
+    // the face: eyes track a threat if there is one, else follow the aim
+    const mood = this.mood();
+    const blinkPh = (game.time + this.idx * 1.37) % 3.3;
+    setFace(mood, blinkPh < 0.13 ? Math.sin((blinkPh / 0.13) * Math.PI) : 0, game.time + this.idx);
+    this.char.draw(this.char, r, this.aim);
+    setFace('idle');
+
     // burning glow (the fiery particles themselves come from update())
     if (this.burning > 0) {
-      ctx.save();
       const fa = 0.35 + 0.2 * Math.sin(game.time * 22);
-      const g = ctx.createRadialGradient(0, 0, this.r * 0.4, 0, 0, this.r + 12);
+      const g = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, r + 12);
       g.addColorStop(0, `rgba(255,170,40,${fa})`);
       g.addColorStop(1, 'rgba(255,60,0,0)');
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(0, 0, this.r + 12, 0, TAU);
+      ctx.arc(0, 0, r + 12, 0, TAU);
       ctx.fill();
-      ctx.restore();
     }
-    // bamboozled: dizzy spinning marks orbiting the head
-    if (this.bamboozled > 0) {
+    // chilled shimmer (slowed, building toward a freeze)
+    if (this.chilled > 0 && this.frozen <= 0) {
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = '#bdf0ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 3, 0, TAU);
+      ctx.stroke();
+    }
+    // frozen overlay: a faceted block of ice with a glint
+    if (this.frozen > 0) {
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = '#bfeaff';
+      roundRectPath(-r - 4, -r - 4, (r + 4) * 2, (r + 4) * 2, 6);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#7fd2f5';
+      ctx.lineWidth = 2;
+      roundRectPath(-r - 4, -r - 4, (r + 4) * 2, (r + 4) * 2, 6);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.8)';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-r + 1, -r + 6);
+      ctx.lineTo(-r + 8, -r - 1);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // orbiting marks: "?" while bamboozled, stars while reeling from a shove
+    if (this.bamboozled > 0 || this.stagger > 0) {
       ctx.save();
-      ctx.fillStyle = POWERS.BAMBOOZLE.color;
+      const dizzy = this.bamboozled > 0;
+      ctx.fillStyle = dizzy ? POWERS.BAMBOOZLE.color : '#ffe08a';
       ctx.font = '900 12px "Trebuchet MS"';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       for (let i = 0; i < 3; i++) {
         const a = game.time * 7 + (i * TAU) / 3;
         ctx.globalAlpha = 0.6 + 0.4 * Math.sin(a);
-        ctx.fillText('?', Math.cos(a) * (this.r + 6), -this.r - 6 + Math.sin(a) * 3);
+        ctx.fillText(dizzy ? '?' : '★', this.x + Math.cos(a) * (r + 6), by - r - 6 + Math.sin(a) * 3);
       }
       ctx.restore();
     }
-    // chilled shimmer (slowed, building toward a freeze)
-    if (this.chilled > 0 && this.frozen <= 0) {
-      ctx.save();
-      ctx.globalAlpha = 0.35;
-      ctx.strokeStyle = '#bdf0ff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.r + 3, 0, TAU);
-      ctx.stroke();
-      ctx.restore();
-    }
-    // frozen overlay
-    if (this.frozen > 0) {
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = '#bfeaff';
-      roundRectPath(-this.r - 4, -this.r - 4, (this.r + 4) * 2, (this.r + 4) * 2, 6);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#7fd2f5';
-      ctx.lineWidth = 2;
-      roundRectPath(-this.r - 4, -this.r - 4, (this.r + 4) * 2, (this.r + 4) * 2, 6);
-      ctx.stroke();
-    }
-    ctx.restore();
 
-    // boomerang-in-hand indicators + charge arc (ride up with the hop).
-    // While slashing, one boomerang is busy being swung — don't double-draw it.
-    if (this.boomsInHand > 0) {
-      const hbY = this.y + bobY - this.jumpZ;
+    this.drawArms(by, baseA * flick);
+
+    // charge arc + flight preview
+    if (this.boomsInHand > 0 && this.charging && this.charge > 0.05) {
       const a = Math.atan2(this.aim[1], this.aim[0]);
-      const shown = this.slashT > 0 ? this.boomsInHand - 1 : this.boomsInHand;
-      // melee-windup telegraph: a bot about to swing cocks its boomerang high
-      // behind its shoulder, spinning fast and flashing white — the readable
-      // "get out of the way" cue that makes the windup mechanic fair
-      const windup = this.isAI && this.ai.meleeT > 0 && this.slashT <= 0;
-      for (let i = windup ? 1 : 0; i < shown; i++) {
-        const off = (i - (shown - 1) / 2) * 0.5;
-        const hx = this.x + Math.cos(a + off) * (this.r + 9);
-        const hy = hbY + Math.sin(a + off) * (this.r + 9);
-        drawBoomShape(hx, hy, 7, game.time * 6, this.char.dark);
-      }
-      if (windup && shown > 0) {
-        const wob = Math.sin(game.time * 24) * 0.12;
-        const wx = this.x + Math.cos(a - 1.15 + wob) * (this.r + 12);
-        const wy = hbY + Math.sin(a - 1.15 + wob) * (this.r + 12);
-        drawBoomShape(wx, wy, 10, game.time * 16, Math.floor(game.time * 16) % 2 ? '#fff' : this.char.dark);
-      }
-      if (this.charging && this.charge > 0.05) {
-        ctx.strokeStyle = `hsl(${lerp(60, 0, this.charge)},100%,60%)`;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(this.x, hbY, this.r + 14, a - this.charge * 1.5, a + this.charge * 1.5);
-        ctx.stroke();
-      }
+      ctx.strokeStyle = `hsl(${lerp(60, 0, this.charge)},100%,60%)`;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(this.x, by, r + 15, a - this.charge * 1.5, a + this.charge * 1.5);
+      ctx.stroke();
       // human-only: dotted flight preview while charging, so banked curve
       // throws are aimable instead of guesswork
-      if (!this.isAI && this.charging && this.charge > 0.04) this.drawThrowPreview();
+      if (!this.isAI && this.charge > 0.04) this.drawThrowPreview();
     }
-    // respawn pip(s)
+    // respawn pip(s): a ring that fills as the lost boomerang rematerialises
     for (let i = 0; i < this.respawns.length; i++) {
-      ctx.fillStyle = 'rgba(255,255,255,.4)';
+      const px = this.x + (i - (this.respawns.length - 1) / 2) * 11;
+      const py = by - r - 9;
+      ctx.strokeStyle = 'rgba(255,255,255,.22)';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(this.x + (i - (this.respawns.length - 1) / 2) * 9, this.y - this.r - 8, 3, 0, TAU * (1 - this.respawns[i] / RESPAWN_TIME));
+      ctx.arc(px, py, 3.6, 0, TAU);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.85)';
+      ctx.beginPath();
+      ctx.arc(px, py, 3.6, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - this.respawns[i] / RESPAWN_TIME));
+      ctx.stroke();
+    }
+    // humans get tiny under-foot cooldown bars (dash, then hop) that appear
+    // only while recharging — every couch player can read their own
+    if (!this.isAI && !this.inBush) {
+      const bars: [number, string][] = [];
+      if (this.dashCd > 0) bars.push([1 - this.dashCd / (this.powers.has('SPEED') ? 0.22 : 0.7), '#fff3df']);
+      if (this.airCd > 0 && this.airT <= 0) bars.push([1 - this.airCd / JUMP_CD, '#8fe6ff']);
+      bars.forEach(([k, col], i) => {
+        const yy = this.y + r + 9 + i * 5;
+        ctx.fillStyle = 'rgba(13,8,22,.6)';
+        ctx.fillRect(this.x - 10, yy, 20, 3);
+        ctx.fillStyle = col;
+        ctx.fillRect(this.x - 10, yy, 20 * clamp(k, 0, 1), 3);
+      });
+    }
+    // a human's own-colour chevron rides overhead for the whole round, so
+    // "which one is me?" never needs asking mid-brawl
+    if (!this.isAI && !this.inBush && game.state === 'playing' && game.fightT <= 0) {
+      const cy = by - r - (this.respawns.length ? 20 : 12) + Math.sin(game.time * 4) * 1.2;
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = HUMAN_TINTS[game.players.indexOf(this) % HUMAN_TINTS.length];
+      ctx.strokeStyle = 'rgba(20,12,32,.8)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(this.x - 5, cy - 5);
+      ctx.lineTo(this.x + 5, cy - 5);
+      ctx.lineTo(this.x, cy + 1.5);
+      ctx.closePath();
       ctx.fill();
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
-  /** Simulate the charged throw with the live flight maths and dot its path,
-   *  stopping at the first wall/obstacle the boomerang would bounce off. */
+  /** Hands and whatever they're holding. Drawn in world space (not inside
+   *  the body's squash transform) so held boomerangs keep their shape. */
+  private drawArms(by: number, alpha: number): void {
+    if (this.frozen > 0) return;
+    const r = this.r * VIS;
+    const a = Math.atan2(this.aim[1], this.aim[0]);
+    const swing = Math.sin(this.walkPh) * 0.3 * this.moveK;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const at = (ang: number, d: number): [number, number] => [this.x + Math.cos(ang) * d, by + Math.sin(ang) * d];
+
+    if (this.slashT > 0) {
+      // the swing: blade (or bare hand) sweeps across the arc, trailing a swoosh
+      const k = 1 - this.slashT / SLASH_ACTIVE; // 0 wind-up → 1 follow-through
+      const fade = this.slashT / SLASH_ACTIVE;
+      const sweep = (this.swat ? SLASH_HALF * 0.8 : SLASH_HALF) * 1.5;
+      const start = a - this.swingDir * sweep;
+      const blade = start + this.swingDir * sweep * 2 * k;
+      const rad = this.r + SLASH_RANGE * (this.swat ? 0.55 : 0.8); // the true reach, not the drawn size
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = `rgba(255,255,255,${(this.swat ? 0.5 : 0.85) * fade})`;
+      ctx.lineWidth = this.swat ? 4 : 7;
+      ctx.beginPath();
+      ctx.arc(this.x, by, rad, start, blade, this.swingDir < 0);
+      ctx.stroke();
+      if (!this.swat) {
+        ctx.strokeStyle = `rgba(180,240,255,${0.45 * fade})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(this.x, by, rad + 5, start, blade, this.swingDir < 0);
+        ctx.stroke();
+      }
+      const [hx, hy] = at(blade, rad);
+      if (!this.swat) drawBoomShape(hx, hy, 10, blade + k * 9, this.char.dark);
+      this.drawHand(...at(blade, rad - (this.swat ? 0 : 7)), this.swat ? 1.25 : 1);
+      // the off hand (and any second boomerang) trails behind
+      const [ox, oy] = at(a - this.swingDir * 2.2, r + 3);
+      if (!this.swat && this.boomsInHand > 1) drawBoomShape(ox, oy, 7, a + 0.8, this.char.dark);
+      this.drawHand(ox, oy);
+      ctx.restore();
+      return;
+    }
+
+    // resting poses for the two hands
+    let wa = a + 0.62 + swing; // weapon hand: a little to the aim's right
+    let wd = r + 6;
+    let oa = a - 0.95 - swing; // off hand
+    let od = r + 3;
+    let boomRot = a + 0.75;
+    let boomSize = 7.5;
+    let boomCol: string = this.char.dark;
+    if (!this.armed) {
+      // empty-handed: both mitts up and ready (to swat, or to flap in panic)
+      wa = a + 1.0 + swing;
+      wd = r + 4;
+      oa = a - 1.0 - swing;
+      if (this.airT > 0 || this.stagger > 0) {
+        wa = -Math.PI / 2 + 0.75 + Math.sin(game.time * 26) * 0.3;
+        oa = -Math.PI / 2 - 0.75 - Math.sin(game.time * 26) * 0.3;
+        wd = od = r + 6;
+      }
+    }
+    if (this.throwT > 0) {
+      // follow-through: the throwing arm whips across in front
+      const k = this.throwT / 0.22;
+      wa = a - 0.5 * k;
+      wd = r + 6 + 8 * k;
+    }
+    if (this.catchT > 0) wd += Math.sin((this.catchT / 0.25) * Math.PI) * 5;
+    if (this.armed) {
+      if (this.charging && this.charge > 0.05) {
+        // cocking the arm back: further round the longer the hold
+        wa = a + 0.62 + this.charge * 2.0;
+        wd = r + 7 + this.charge * 4;
+        boomRot = wa + 1.2 + (this.charge >= 1 ? Math.sin(game.time * 60) * 0.25 : 0);
+        boomSize = 7.5 + this.charge * 2.5;
+      }
+      // melee-windup telegraph: a bot about to swing cocks its boomerang high
+      // behind its shoulder, flashing white — the readable "get out of the
+      // way" cue that makes the windup mechanic fair
+      if (this.isAI && this.ai.meleeT > 0) {
+        wa = a - 1.15 + Math.sin(game.time * 24) * 0.12;
+        wd = r + 12;
+        boomRot = game.time * 16;
+        boomSize = 10;
+        boomCol = Math.floor(game.time * 16) % 2 ? '#fff' : this.char.dark;
+      }
+      const [wx, wy] = at(wa, wd);
+      drawBoomShape(wx + Math.cos(wa) * 5, wy + Math.sin(wa) * 5, boomSize, boomRot, boomCol);
+      if (this.boomsInHand > 1) {
+        const [ox, oy] = at(oa, od);
+        drawBoomShape(ox + Math.cos(oa) * 5, oy + Math.sin(oa) * 5, 7.5, a - 0.75, this.char.dark);
+      }
+    }
+    this.drawHand(...at(wa, wd));
+    this.drawHand(...at(oa, od));
+    ctx.restore();
+  }
+
+  /**
+   * The departed. A fallen fighter lingers as a see-through ghost that its
+   * player (or its bot) keeps steering — see `updateGhost` for what it can do.
+   */
+  private drawGhost(): void {
+    if (game.state !== 'playing' || !game.ghosts) return;
+    const r = this.r;
+    const t = game.time + this.idx;
+    const y = this.gy + Math.sin(t * 3) * 3;
+    const ready = this.booCd <= 0;
+    ctx.save();
+    ctx.translate(this.gx, y);
+    // the gust's reach, pulsing when it's ready / flashing as it fires
+    if (this.booT > 0) {
+      ctx.globalAlpha = (this.booT / 0.3) * 0.5;
+      ctx.strokeStyle = '#e8e2ff';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, GHOST_REACH * (1 - (this.booT / 0.3) * 0.6), 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = ready ? 0.5 : 0.24;
+    ctx.scale(0.82, 0.82);
+    // a little sheet-ghost tail under the body
+    ctx.fillStyle = '#efeaff';
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.9, 0);
+    for (let i = 0; i <= 6; i++) {
+      const x = -r * 0.9 + (i / 6) * r * 1.8;
+      ctx.lineTo(x, r * 1.25 + (i % 2 ? -4 : 3) + Math.sin(t * 6 + i) * 1.5);
+    }
+    ctx.lineTo(r * 0.9, 0);
+    ctx.closePath();
+    ctx.fill();
+    setFace(this.booT > 0 ? 'happy' : ready ? 'smug' : 'ko', 0, t);
+    this.char.draw(this.char, r, [this.gvx / 200, this.gvy / 200]);
+    setFace('idle');
+    // halo
+    ctx.globalAlpha *= 1.4;
+    ctx.strokeStyle = '#ffe9a8';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(0, -r * 1.45, r * 0.6, r * 0.2, 0, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Simulate the charged throw with the live flight maths and dot its path
+   *  — THROUGH its ricochets, so a bank shot can be lined up on purpose. */
   private drawThrowPreview(): void {
-    const charge = clamp(this.charge, 0.12, 1);
-    const speed = (430 + charge * 230) * (this.powers.has('BIG') ? 0.85 : 1);
-    let outT = (0.42 + charge * 0.4) * (this.powers.has('WEAKARM') ? 0.5 : 1);
+    const tp = throwParams(this.charge, this.powers.has('WEAKARM'), this.powers.has('BIG'));
+    let outT = tp.outT;
     // mirror doThrow's bank-side choice so the dots always tell the truth
-    const curve = this.powers.has('TELEKINESIS') ? 0 : (BASE_CURVE + charge * (MAX_CURVE - BASE_CURVE)) * this.curveSide();
+    const curve = this.powers.has('TELEKINESIS') ? 0 : tp.curve * this.curveSide();
     let px = this.x + this.aim[0] * (this.r + 6);
     let py = this.y + this.aim[1] * (this.r + 6);
-    let vx = this.aim[0] * speed;
-    let vy = this.aim[1] * speed;
+    let vx = this.aim[0] * tp.speed;
+    let vy = this.aim[1] * tp.speed;
     const step = 1 / 50;
-    const solids = game.gates.length ? [...OBSTACLES, ...game.gates.filter((g) => !g.open)] : OBSTACLES;
+    const solids: Rect[] = game.gates.length || game.crushers.length ? [...OBSTACLES, ...game.gates.filter((g) => !g.open), ...game.crushers] : OBSTACLES;
     ctx.save();
-    const hue = lerp(60, 0, charge);
+    const hue = lerp(60, 0, clamp(this.charge, 0.12, 1));
     let i = 0;
-    let blocked = false;
-    while (outT > 0 && !blocked) {
+    let bounces = 0;
+    const R = 11;
+    const mark = (x: number, y: number): void => {
+      // a little burst where it will ricochet
+      ctx.strokeStyle = `hsla(${hue},100%,78%,.7)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, TAU);
+      ctx.stroke();
+    };
+    while (outT > 0 && bounces < 3) {
       const c = Math.cos(curve * step);
       const s = Math.sin(curve * step);
       const nvx = vx * c - vy * s;
@@ -1375,31 +1691,73 @@ export class Player {
       px += vx * step;
       py += vy * step;
       outT -= step;
-      if (px < BOUNDS.l + 11 || px > BOUNDS.r - 11 || py < BOUNDS.t + 11 || py > BOUNDS.b - 11) blocked = true;
-      else {
-        for (const R of solids) {
-          if (circleRect(px, py, 11, R).hit) {
-            blocked = true;
-            break;
-          }
+      let hit = false;
+      if (px < BOUNDS.l + R) {
+        px = BOUNDS.l + R;
+        vx = Math.abs(vx);
+        hit = true;
+      } else if (px > BOUNDS.r - R) {
+        px = BOUNDS.r - R;
+        vx = -Math.abs(vx);
+        hit = true;
+      }
+      if (py < BOUNDS.t + R) {
+        py = BOUNDS.t + R;
+        vy = Math.abs(vy);
+        hit = true;
+      } else if (py > BOUNDS.b - R) {
+        py = BOUNDS.b - R;
+        vy = -Math.abs(vy);
+        hit = true;
+      }
+      for (const Rc of solids) {
+        const h = circleRect(px, py, R, Rc);
+        if (h.hit) {
+          px += h.nx! * h.pen!;
+          py += h.ny! * h.pen!;
+          const dot = vx * h.nx! + vy * h.ny!;
+          vx -= 2 * dot * h.nx!;
+          vy -= 2 * dot * h.ny!;
+          hit = true;
         }
       }
-      if (!blocked && i % 2 === 0) {
-        const fade = 0.5 - i * 0.006;
+      for (const B of game.bumpers) {
+        const dx = px - B.x;
+        const dy = py - B.y;
+        const d = Math.hypot(dx, dy) || 0.001;
+        if (d < B.r + R) {
+          const dot = (vx * dx + vy * dy) / d;
+          if (dot < 0) {
+            vx -= (2 * dot * dx) / d;
+            vy -= (2 * dot * dy) / d;
+          }
+          px = B.x + (dx / d) * (B.r + R);
+          py = B.y + (dy / d) * (B.r + R);
+          hit = true;
+        }
+      }
+      if (hit) {
+        bounces++;
+        mark(px, py);
+        // bombs and MULTI fans end at the first thing they touch
+        if (this.powers.has('BOMB') || this.powers.has('MULTI')) break;
+      }
+      if (i % 2 === 0) {
+        const fade = (0.55 - i * 0.006) * (bounces ? 0.75 : 1);
         if (fade > 0.08) {
-          ctx.fillStyle = `hsla(${hue},100%,68%,${fade})`;
+          ctx.fillStyle = `hsla(${hue},100%,${bounces ? 82 : 68}%,${fade})`;
           ctx.beginPath();
-          ctx.arc(px, py, 2.6, 0, TAU);
+          ctx.arc(px, py, bounces ? 2.1 : 2.6, 0, TAU);
           ctx.fill();
         }
       }
       i++;
     }
-    // terminus marker: bounce point or the turn-back apex
+    // terminus marker: the turn-back apex
     ctx.strokeStyle = `hsla(${hue},100%,70%,.55)`;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(px, py, blocked ? 5 : 7, 0, TAU);
+    ctx.arc(px, py, 7, 0, TAU);
     ctx.stroke();
     ctx.restore();
   }

@@ -2,7 +2,8 @@ import { audio } from '../core/audio';
 import { BOUNDS, W } from '../constants';
 import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse, readGamepad } from '../core/input';
-import { aiThink } from '../systems/ai';
+import { aiThink, ghostThink } from '../systems/ai';
+import { updateBushes } from '../systems/bushes';
 import { resolveBoomerangClashes, resolveBoomerangHits, resolveDecoyHits, resolveParries, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
 import { spawnConfetti, spawnPopText, spawnRing } from '../systems/effects';
 import { POWERS } from '../data/powers';
@@ -226,14 +227,42 @@ export function update(dt: number): void {
   const raw = dt;
   // cinematic slow-mo (round-deciding kills): the timer burns in real time
   // while everything below — including particles & visuals — runs at 30%.
-  if (game.state === 'playing' && game.slowmo > 0) {
+  const slow = game.state === 'playing' && game.slowmo > 0;
+  if (slow) {
     game.slowmo = Math.max(0, game.slowmo - raw);
-    dt *= 0.3;
+    // ease back up to speed over the last stretch instead of snapping
+    dt *= game.slowmo > 0.2 ? 0.3 : lerp(1, 0.3, game.slowmo / 0.2);
   }
   game.time += dt;
   game.shake = Math.max(0, game.shake - dt * 40);
   game.flash = Math.max(0, game.flash - dt);
   if (game.fightT > 0) game.fightT = Math.max(0, game.fightT - raw);
+  if (game.showdownT > 0) game.showdownT = Math.max(0, game.showdownT - raw);
+  if (game.finishT > 0) game.finishT = Math.max(0, game.finishT - raw);
+
+  // presentation camera: the kick springs home; the finishing push-in swells
+  // quickly, holds through the slow-mo, then eases back out
+  const cam = game.cam;
+  const spring = Math.pow(0.0004, raw);
+  cam.kx *= spring;
+  cam.ky *= spring;
+  if (cam.punch > 0) cam.punch = Math.max(0, cam.punch - raw / 1.5);
+  const zoomGoal = game.reduceFx ? 1 : 1 + 0.2 * Math.min(1, cam.punch * 4);
+  cam.zoom = lerp(cam.zoom, zoomGoal, 1 - Math.pow(cam.zoom < zoomGoal ? 0.0005 : 0.03, raw));
+
+  // the music breathes with the match: sagging under a finishing slow-mo,
+  // a touch quicker in a showdown, quicker still under sudden death
+  const inRound = game.state === 'playing';
+  audio.setMusicMood(slow && game.slowmo > 0.2 ? 0.74 : inRound && game.sudden ? 1.07 : inRound && game.showdown ? 1.035 : 1, slow && game.slowmo > 0.2 ? 1000 : 20000);
+  // the charge whine follows the most wound-up human
+  let wind = 0;
+  if (inRound) for (const p of game.players) if (!p.isAI && p.alive && p.charging) wind = Math.max(wind, p.charge);
+  audio.chargeTone(wind);
+
+  // age the kill feed
+  for (const f of game.feed) f.t += raw;
+  if (game.feed.length && game.feed[0].t > 5) game.feed.shift();
+  for (const b of game.bumpers) b.flash = Math.max(0, b.flash - dt);
 
   // age the power-pickup toasts & floor decals
   for (const t of game.toasts) t.t += raw;
@@ -279,7 +308,7 @@ export function update(dt: number): void {
     if (Math.ceil(game.countdownT) < before && game.countdownT > 0) audio.pip(); // 3…2…1 blips
     if (game.countdownT <= 0) {
       game.state = 'playing';
-      game.fightT = 0.8; // "FIGHT!" splash
+      game.fightT = 0.7; // "FIGHT!" splash
       audio.fight();
     }
   }
@@ -371,7 +400,15 @@ export function update(dt: number): void {
     // players
     for (let i = 0; i < game.players.length; i++) {
       const p = game.players[i];
-      if (!p.alive) continue;
+      if (!p.alive) {
+        // the fallen haunt on (FFA & Team Up only — the objective modes have
+        // their own rhythms)
+        if (game.ghosts && game.mode <= 1) {
+          audio.emitX = p.gx;
+          p.updateGhost(dt, p.isAI ? ghostThink(p) : humanIntents(p, i));
+        }
+        continue;
+      }
       let intents = p.isAI ? aiThink(p, dt) : humanIntents(p, i);
       // a blinded seeker is rooted in place during the setup window
       if (p === seeker && game.hsSetup > 0) intents = { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
@@ -385,6 +422,7 @@ export function update(dt: number): void {
     spreadFire(); // burning fighters ignite their neighbours
     updateGolden(dt); // Golden Boomerang carry/score (no-op in other modes)
     updateBattleRoyale(dt); // shrinking lethal border (no-op unless triggered)
+    updateBushes(dt); // burnable cover
     // boomerangs
     for (const b of game.boomerangs) {
       audio.emitX = b.x;
@@ -414,7 +452,20 @@ export function update(dt: number): void {
     // cleanup dead boomerangs
     game.boomerangs = game.boomerangs.filter((b) => !b.dead);
 
+    // SHOWDOWN: the moment a brawl boils down to its last two
+    if (!game.showdown && game.mode <= 1 && game.players.length > 2) {
+      const left = game.players.filter((q) => q.alive);
+      if (left.length === 2 && left[0].isEnemy(left[1])) {
+        game.showdown = true;
+        game.showdownT = 1.8;
+        audio.showdown();
+      }
+    }
+
+    const wasFinishing = game.finishing;
     endRoundCheck();
+    // the instant a round is decided: slow everything down for its last beat
+    if (game.finishing && !wasFinishing) game.slowmo = Math.max(game.slowmo, 0.8);
   }
 
   if (game.state === 'roundover') {

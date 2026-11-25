@@ -7,7 +7,7 @@ import { arena } from '../data/arena';
 import { CHARS } from '../data/characters';
 import { POWERS } from '../data/powers';
 import { drawBoomShape, drawProp } from '../gfx/shapes';
-import { drawArena } from './arena';
+import { drawArena, drawBumpers, drawBushCanopies, drawBushStumps } from './arena';
 
 /** Weather overlay: slanting rain — or drifting snow on the ice biome. */
 function drawWeather(): void {
@@ -190,6 +190,7 @@ export function drawWorld(): void {
     drawProp(d.propIdx, 19);
     ctx.restore();
   }
+  drawBushStumps();
   // hazards under players
   for (const h of game.hazards) h.draw();
   // pickups
@@ -197,12 +198,17 @@ export function drawWorld(): void {
   if (game.golden && !game.golden.carrier) drawGolden();
   // players + DECOY clones, depth-sorted together so overlap reads correctly
   const sorted = [...game.players.filter((p) => p.alive), ...game.decoys].sort((a, b) => a.y - b.y);
+  // (ghosts of the fallen float above the living, drawn after them)
   for (const e of sorted) {
     if ('char' in e) e.draw();
     else drawDecoy(e);
   }
+  drawBumpers();
+  // leafy canopies close over anyone inside them
+  drawBushCanopies();
   // crusher blocks ride above fighters, so the squished vanish beneath them
   for (const c of game.crushers) c.draw();
+  if (game.ghosts && game.mode <= 1) for (const p of game.players) if (!p.alive) p.draw();
   // a carried artifact rides above its holder
   if (game.golden && game.golden.carrier) drawGolden();
   // boomerangs on top

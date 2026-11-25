@@ -3,7 +3,7 @@ import { BOUNDS } from '../constants';
 import { OBSTACLES, PITS } from '../data/arena';
 import { PERSONAS } from '../data/characters';
 import { game } from '../game/state';
-import { circleRect, inPit, nearPit } from './collision';
+import { circleRect, inPit, nearPit, pitNormal } from './collision';
 import { throwParams } from '../entities/Player';
 import type { Intents, Rect } from '../types';
 import type { Player } from '../entities/Player';
@@ -223,6 +223,7 @@ function lineHitsObstacle(x1: number, y1: number, x2: number, y2: number): boole
     for (const R of OBSTACLES) {
       if (px > R.x - 4 && px < R.x + R.w + 4 && py > R.y - 4 && py < R.y + R.h + 4) return true;
     }
+    for (const B of game.bumpers) if (dist2(px, py, B.x, B.y) < (B.r + 6) * (B.r + 6)) return true;
     // closed gates block line of sight too (an open one is passable)
     for (const g of game.gates) {
       if (!g.open && px > g.x - 4 && px < g.x + g.w + 4 && py > g.y - 4 && py < g.y + g.h + 4) return true;
@@ -570,11 +571,9 @@ export function aiThink(p: Player, dt: number): Intents {
 
   // steer away from the lip of any bottomless pit (strong, short-range repulsion)
   for (const P of PITS) {
-    const cx = P.x + P.w / 2;
-    const cy = P.y + P.h / 2;
     const margin = 46;
     if (p.x > P.x - margin && p.x < P.x + P.w + margin && p.y > P.y - margin && p.y < P.y + P.h + margin) {
-      const [ax, ay] = norm(p.x - cx, p.y - cy);
+      const [ax, ay] = pitNormal(P, p.x, p.y);
       mvx += ax * 2.4;
       mvy += ay * 2.4;
     }
@@ -637,5 +636,35 @@ export function aiThink(p: Player, dt: number): Intents {
 
   const n = norm(mvx, mvy);
   intents.move = mvx || mvy ? n : [0, 0];
+  return intents;
+}
+
+/**
+ * A bot's afterlife: drift toward the nearest living rival and, when one is
+ * within reach, let out a gust — eagerly if the shove would be fatal, now
+ * and then just for mischief. Easier tiers haunt half-heartedly.
+ */
+export function ghostThink(p: Player): Intents {
+  const intents: Intents = { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
+  let best: Player | null = null;
+  let bd = Infinity;
+  for (const q of game.players) {
+    if (!q.alive || !p.isEnemy(q)) continue;
+    const d = dist(p.gx, p.gy, q.x, q.y);
+    if (d < bd) {
+      bd = d;
+      best = q;
+    }
+  }
+  if (!best) return intents;
+  const [tx, ty] = norm(best.x - p.gx, best.y - p.gy);
+  if (bd > 48) intents.move = [tx, ty];
+  if (p.booCd <= 0 && bd < 70 && !best.airborne) {
+    const eager = [0.25, 0.5, 0.85][clamp(game.difficulty, 0, 2)];
+    const deadly = shoveIsDeadly(best, tx, ty);
+    // rolled once per opportunity: on a "no", wait a beat before reconsidering
+    if (Math.random() < (deadly ? eager : eager * 0.12)) intents.dash = true;
+    else p.booCd = 0.5;
+  }
   return intents;
 }
