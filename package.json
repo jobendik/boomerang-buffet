@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "sim": "SIM_REPORT=1 vitest run tests/ai-report.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lab": "SIM_LAB=1 vitest run tests/lab.test.ts"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",

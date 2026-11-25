@@ -164,8 +164,12 @@ export function meleeRusher(_t: number, players: Player[]): void {
   // can connect — not a naive stroll through the point-blank zone
   const dash = fd < 240 && fd > 55 && me.dashCd <= 0 && me.armed;
   setMoveKeys(foe.x - me.x, foe.y - me.y, dash);
-  keys['KeyE'] = fd < 72 && me.armed;
+  // swings are one per press, so in range the proxy mashes (down on
+  // alternate frames) the way a player hammering the button would
+  mash = !mash;
+  keys['KeyE'] = fd < 72 && me.armed && mash;
 }
+let mash = false;
 
 export interface RusherResult {
   kills: number; // slices landed by the rusher before the round ended

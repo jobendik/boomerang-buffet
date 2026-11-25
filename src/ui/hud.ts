@@ -4,14 +4,17 @@ import { clamp, TAU } from '../core/math';
 import { POWERS } from '../data/powers';
 import { arena } from '../data/arena';
 import { drawPowerIcon } from '../gfx/icons';
-import { roundRectPath } from '../gfx/shapes';
+import { drawBoomShape, roundRectPath } from '../gfx/shapes';
+import { setFace } from '../data/characters';
 import { fontB, fontD, keycap, pill, UI } from './widgets';
 import { game } from '../game/state';
+import { TEAM_TINTS } from '../entities/Player';
+import { PERSONAS } from '../data/characters';
 import type { Player } from '../entities/Player';
 
 /** In-game HUD: scoreboard cards, objective banner, pickup toasts, cooldowns. */
 
-const TEAM_COLORS = ['#5ad1ff', '#ff7ad0'];
+const TEAM_COLORS = TEAM_TINTS;
 
 /** Label for a local human's card/locator: "YOU" when solo, else "P1"-"P4"
  *  matching their control-scheme slot (see `humanIntents` in game/update.ts). */
@@ -19,6 +22,12 @@ function humanLabel(p: Player): string {
   if (game.numHumans <= 1) return 'YOU';
   const slot = game.players.indexOf(p);
   return `P${slot + 1}`;
+}
+
+/** What to call a fighter in text: their snack name for bots, "You" for a
+ *  solo human, "P2" etc. on a shared couch. */
+export function playerName(p: Player): string {
+  return p.isAI ? p.char.name : game.numHumans <= 1 ? 'You' : humanLabel(p);
 }
 
 function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
@@ -86,6 +95,13 @@ function drawCard(p: Player, x: number, y: number, w: number, h: number): void {
   ctx.textBaseline = 'middle';
   const name = p.isAI ? p.char.name : game.numHumans <= 1 ? 'You' : humanLabel(p);
   ctx.fillText(name, 46, 14);
+  // a bot's temperament, so you know who you're dealing with
+  if (p.isAI && w > 130 && p.powers.size <= 2) {
+    const nw = ctx.measureText(name).width;
+    ctx.fillStyle = 'rgba(189,164,207,.7)';
+    ctx.font = fontB(8.5, 800);
+    ctx.fillText(PERSONAS[p.char.persona].title.toUpperCase(), 46 + nw + 6, 14.5);
+  }
 
   if (game.mode === 2) {
     // Golden mode: a hold-progress bar toward the win
@@ -201,6 +217,141 @@ function drawToasts(): void {
   void n;
 }
 
+/** The little glyph between killer and victim in a feed row. */
+function drawCauseGlyph(cause: string, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = UI.cream;
+  ctx.fillStyle = UI.cream;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  switch (cause) {
+    case 'slash':
+      ctx.beginPath();
+      ctx.arc(-3, 3, 8, -1.5, 0.1);
+      ctx.stroke();
+      break;
+    case 'bomb':
+      ctx.beginPath();
+      ctx.arc(0, 1, 5, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = '#ffce54';
+      ctx.beginPath();
+      ctx.moveTo(3, -4);
+      ctx.lineTo(6, -7);
+      ctx.stroke();
+      break;
+    case 'burn':
+      ctx.fillStyle = '#ff9a3a';
+      ctx.beginPath();
+      ctx.moveTo(0, -7);
+      ctx.quadraticCurveTo(7, 0, 0, 7);
+      ctx.quadraticCurveTo(-7, 0, 0, -7);
+      ctx.fill();
+      break;
+    case 'pit':
+      ctx.fillStyle = '#0b0712';
+      ctx.strokeStyle = '#9b7fd1';
+      ctx.beginPath();
+      ctx.ellipse(0, 3, 7, 3.5, 0, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = UI.cream;
+      ctx.beginPath();
+      ctx.moveTo(0, -7);
+      ctx.lineTo(0, 0);
+      ctx.moveTo(-3, -3);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(3, -3);
+      ctx.stroke();
+      break;
+    case 'crush':
+    case 'squash':
+      ctx.fillStyle = '#ffce54';
+      roundRectPath(-6, -6, 12, 8, 2);
+      ctx.fill();
+      ctx.fillRect(-7, 5, 14, 2);
+      break;
+    case 'shatter':
+      ctx.strokeStyle = '#bdf0ff';
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 7, Math.sin(a) * 7);
+        ctx.lineTo(-Math.cos(a) * 7, -Math.sin(a) * 7);
+        ctx.stroke();
+      }
+      break;
+    case 'ring':
+      ctx.strokeStyle = UI.red;
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, TAU);
+      ctx.stroke();
+      break;
+    default:
+      drawBoomShape(0, 0, 7, 0.6, UI.cream);
+  }
+  ctx.restore();
+}
+
+/**
+ * The kill feed: who got whom and how, stacked down the right-hand edge.
+ * A trick-shot callout rides along in gold — the receipt for "did you SEE
+ * that?" — and a death with nobody to blame shows the victim alone.
+ */
+function drawFeed(): void {
+  const rowH = 28;
+  let y = 84;
+  for (const f of game.feed) {
+    const inK = clamp(f.t / 0.18, 0, 1);
+    const outK = clamp((5 - f.t) / 0.6, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = Math.min(inK, outK) * 0.95;
+    ctx.font = fontB(11, 900);
+    const tagW = f.tag ? ctx.measureText(f.tag).width + 12 : 0;
+    const w = (f.killer ? 78 : 52) + tagW;
+    const x = W - WALL - 10 - w + (1 - inK) * 40;
+    ctx.fillStyle = 'rgba(13,8,22,.72)';
+    roundRectPath(x, y, w, rowH - 4, 12);
+    ctx.fill();
+    if (f.tag) {
+      ctx.strokeStyle = 'rgba(255,206,84,.7)';
+      ctx.lineWidth = 1.5;
+      roundRectPath(x, y, w, rowH - 4, 12);
+      ctx.stroke();
+    }
+    let cx = x + 15;
+    const face = (p: Player, dead: boolean): void => {
+      ctx.save();
+      ctx.translate(cx, y + 12);
+      ctx.scale(0.5, 0.5);
+      setFace(dead ? 'ko' : 'smug');
+      p.char.draw(p.char, 17, [0, 0]);
+      setFace('idle');
+      ctx.restore();
+      cx += 24;
+    };
+    if (f.killer) {
+      face(f.killer, false);
+      drawCauseGlyph(f.cause, cx, y + 12);
+      cx += 24;
+    } else {
+      drawCauseGlyph(f.cause, cx, y + 12);
+      cx += 22;
+    }
+    face(f.victim, true);
+    if (f.tag) {
+      ctx.fillStyle = UI.gold;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(f.tag, cx - 6, y + 12.5);
+    }
+    ctx.restore();
+    y += rowH;
+  }
+}
+
 export function drawHUD(): void {
   // top scoreboard
   const n = game.players.length;
@@ -233,8 +384,11 @@ export function drawHUD(): void {
     ctx.restore();
   }
 
-  const me = game.players.find((p) => !p.isAI);
-  if (me && me.alive) drawAbilityChips(me);
+  // cooldown chips for a solo player (in couch play each fighter carries
+  // their own under-foot cooldown bars instead — see Player.draw)
+  const me = game.numHumans === 1 ? game.players.find((p) => !p.isAI) : null;
+  if (me && me.alive && game.controlSchemes[0] === 0) drawAbilityChips(me);
+  drawFeed();
   // a "YOU"/"P#" locator floats over each local human through the round's
   // opening (flipping below them when they spawn close to the scoreboard band)
   if (game.state === 'countdown' || game.fightT > 0) {

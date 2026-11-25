@@ -1,4 +1,4 @@
-import { ctx, makeLayer } from '../core/canvas';
+import { ctx, DPR, makeLayer } from '../core/canvas';
 import { W, H, WALL } from '../constants';
 import { arena, PITS, PORTALS, SPAWNS } from '../data/arena';
 import { game } from '../game/state';
@@ -649,7 +649,8 @@ function renderStatic(): void {
   }
 
   for (const P of PITS) paintPit(c, P);
-  for (const B of arena.bushes) paintBush(c, arena.biome, B, rnd);
+  // (bushes are live scenery — they hide fighters, rustle and burn — so
+  // they're drawn per-frame from cached sprites; see drawBushCanopies)
   for (const R of arena.obstacles) paintObstacle(c, arena.biome, R, rnd);
   paintWalls(c, arena.biome, rnd);
 
@@ -797,6 +798,152 @@ function drawGates(dt: number): void {
   });
 }
 
+/* -------------------------------- bushes ---------------------------------- */
+
+const BUSH_PAD = 26;
+let bushSprites: HTMLCanvasElement[] = [];
+
+/** Paint each of the arena's bushes once into its own little sprite. */
+function buildBushSprites(): void {
+  bushSprites = arena.bushes.map((B, i) => {
+    const cv = document.createElement('canvas');
+    cv.width = (B.w + BUSH_PAD * 2) * DPR;
+    cv.height = (B.h + BUSH_PAD * 2) * DPR;
+    const c = cv.getContext('2d') as CanvasRenderingContext2D;
+    c.scale(DPR, DPR);
+    paintBush(c, arena.biome, { x: BUSH_PAD, y: BUSH_PAD, w: B.w, h: B.h }, seeded(hash(arena.name) + i * 7919));
+    return cv;
+  });
+}
+
+/** Burnt-out bushes: a charred stump on the floor, UNDER the fighters. */
+export function drawBushStumps(): void {
+  for (const b of game.bushes) {
+    if (!b.burnt) continue;
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    ctx.fillStyle = 'rgba(18,12,16,.55)';
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * TAU + 0.6;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * b.w * 0.16, cy + Math.sin(a) * b.h * 0.14, b.w * 0.13, 0, TAU);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(70,52,40,.9)';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      const a = -Math.PI / 2 + (i - 1.5) * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + (i - 1.5) * 5, cy + 4);
+      ctx.lineTo(cx + (i - 1.5) * 5 + Math.cos(a) * 12, cy + 4 + Math.sin(a) * 12);
+      ctx.stroke();
+    }
+  }
+}
+
+/**
+ * Living bushes: a leafy canopy drawn OVER the fighters, so anyone inside
+ * really is hidden — until the leaves shake. Burning ones glow from within.
+ * With no round in play (menus) the arena's bushes are simply drawn at rest.
+ */
+export function drawBushCanopies(): void {
+  if (bushKey !== arena.name) {
+    buildBushSprites();
+    bushKey = arena.name;
+  }
+  const live = game.bushes.length === arena.bushes.length;
+  arena.bushes.forEach((B, i) => {
+    const st = live ? game.bushes[i] : null;
+    if (st && st.burnt) return;
+    const cx = B.x + B.w / 2;
+    const cy = B.y + B.h / 2;
+    const shake = st ? st.shake : 0;
+    const sway = Math.sin(game.time * 1.3 + i * 2.1) * 0.012; // a lazy breeze
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(sway + Math.sin(game.time * 46) * 0.05 * shake);
+    ctx.scale(1 + Math.sin(game.time * 38) * 0.05 * shake, 1 + Math.cos(game.time * 31) * 0.05 * shake);
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(bushSprites[i], -B.w / 2 - BUSH_PAD, -B.h / 2 - BUSH_PAD, B.w + BUSH_PAD * 2, B.h + BUSH_PAD * 2);
+    if (st && st.burnT > 0) {
+      // lit from within
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(0, 0, 4, 0, 0, Math.max(B.w, B.h) * 0.62);
+      g.addColorStop(0, `rgba(255,170,50,${0.55 + 0.2 * Math.sin(game.time * 19)})`);
+      g.addColorStop(1, 'rgba(255,60,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(B.w, B.h) * 0.62, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+let bushKey = '';
+
+/** Spring-loaded bumpers: a chunky neon post whose cap pops when struck. */
+export function drawBumpers(): void {
+  for (const B of game.bumpers) {
+    const k = B.flash / 0.3; // 1 just hit → 0 at rest
+    const pop = 1 + k * 0.22;
+    ctx.save();
+    ctx.translate(B.x, B.y);
+    // floor shadow + base skirt
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.beginPath();
+    ctx.ellipse(3, 6, B.r + 3, B.r * 0.92, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#2a1840';
+    ctx.beginPath();
+    ctx.arc(0, 0, B.r + 2, 0, TAU);
+    ctx.fill();
+    // the sprung ring
+    ctx.scale(pop, pop);
+    const ring = ctx.createRadialGradient(-B.r * 0.3, -B.r * 0.35, 2, 0, 0, B.r);
+    ring.addColorStop(0, k > 0.1 ? '#fff' : '#ffb3e3');
+    ring.addColorStop(0.55, '#ff5fc0');
+    ring.addColorStop(1, '#a8267a');
+    ctx.fillStyle = ring;
+    ctx.beginPath();
+    ctx.arc(0, 0, B.r - 1, 0, TAU);
+    ctx.fill();
+    // cap with a little star
+    ctx.fillStyle = k > 0.1 ? '#fffbe0' : '#3a1f55';
+    ctx.beginPath();
+    ctx.arc(0, -1, B.r * 0.58, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = k > 0.1 ? '#ff5fc0' : '#ffd23a';
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * TAU - Math.PI / 2 + game.time * 0.6;
+      const rr2 = i % 2 ? B.r * 0.17 : B.r * 0.4;
+      ctx.lineTo(Math.cos(a) * rr2, -1 + Math.sin(a) * rr2);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // rim light
+    ctx.strokeStyle = `rgba(255,255,255,${0.35 + k * 0.6})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, B.r - 2, -2.4, -0.9);
+    ctx.stroke();
+    ctx.restore();
+    if (k > 0.02) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(B.x, B.y, B.r * 0.5, B.x, B.y, B.r * 2.6);
+      g.addColorStop(0, `rgba(255,120,210,${0.45 * k})`);
+      g.addColorStop(1, 'rgba(255,120,210,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(B.x, B.y, B.r * 2.6, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
 /** Draws the arena: cached static art + live portals/switches/gates. */
 export function drawArena(): void {
   if (cacheKey !== arena.name) {
@@ -811,4 +958,6 @@ export function drawArena(): void {
   drawPortals();
   drawSwitches();
   drawGates(dt);
+  // menus use the arena as a backdrop: put its shrubbery back
+  if (game.state === 'menu' && game.menuPage !== 'title') drawBushCanopies();
 }

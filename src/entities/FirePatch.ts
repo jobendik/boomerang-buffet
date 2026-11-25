@@ -12,6 +12,7 @@ export class FirePatch {
   life: number;
   max: number;
   r: number;
+  readonly kind = 'fire' as const;
 
   constructor(x: number, y: number, owner: Player) {
     this.x = x;

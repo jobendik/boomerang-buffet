@@ -185,6 +185,39 @@ export function readGamepad(padIndex: number): PadIntents | null {
   };
 }
 
+export interface PadEdges {
+  /** Compacted pad numbers (0 = "Gamepad 1") whose Cross/A went down this frame. */
+  confirm: number[];
+  back: boolean; // any pad's Circle/B went down
+  start: boolean; // any pad's Start/Options went down
+}
+
+const padPrev: boolean[][] = [];
+
+/**
+ * Menu-level gamepad presses, edge-detected (the Gamepad API only offers
+ * levels). Call exactly once per frame. Lets a couch full of controllers
+ * drive the menus, join the lobby and call the rematch without anyone
+ * reaching for the mouse.
+ */
+export function pollPadEdges(): PadEdges {
+  const out: PadEdges = { confirm: [], back: false, start: false };
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let n = -1;
+  for (const p of pads) {
+    if (!p || !p.connected) continue;
+    n++;
+    const now = [pressed(p, 0), pressed(p, 1), pressed(p, 9)];
+    const was = padPrev[n] ?? [false, false, false];
+    if (now[0] && !was[0]) out.confirm.push(n);
+    if (now[1] && !was[1]) out.back = true;
+    if (now[2] && !was[2]) out.start = true;
+    padPrev[n] = now;
+  }
+  padPrev.length = n + 1;
+  return out;
+}
+
 /** Whether at least one gamepad is currently connected. */
 export function anyGamepadConnected(): boolean {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];

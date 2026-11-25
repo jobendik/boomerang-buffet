@@ -265,17 +265,17 @@ export function drawPowerIcon(key: PowerKey, x: number, y: number, s: number, co
       }
       break;
     }
-    case 'WEAKARM': {
+    case 'HEAVY': {
+      // a kettlebell: squat body, looped handle
       ctx.beginPath();
-      ctx.moveTo(-s * 0.9, -s * 0.3);
-      ctx.quadraticCurveTo(0, -s * 0.95, s * 0.55, -s * 0.1);
-      ctx.quadraticCurveTo(s * 0.75, s * 0.25, s * 0.55, s * 0.7);
-      ctx.stroke();
-      // drooping arrowhead
+      ctx.moveTo(-s * 0.75, s * 0.85);
+      ctx.lineTo(-s * 0.55, -s * 0.05);
+      ctx.lineTo(s * 0.55, -s * 0.05);
+      ctx.lineTo(s * 0.75, s * 0.85);
+      ctx.closePath();
+      ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(s * 0.25, s * 0.45);
-      ctx.lineTo(s * 0.55, s * 0.7);
-      ctx.lineTo(s * 0.85, s * 0.4);
+      ctx.arc(0, -s * 0.3, s * 0.42, Math.PI, 0);
       ctx.stroke();
       break;
     }

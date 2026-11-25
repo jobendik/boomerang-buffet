@@ -36,25 +36,29 @@ describe('match resolution', () => {
 describe('lethality', () => {
   it('an idle target dies within a round at every difficulty', () => {
     for (const d of DIFFS) {
-      const runs = Array.from({ length: 4 }, () => runSurvival(d));
+      // (12 rounds, not 4: with so few samples this guardrail tripped ~1 run
+      // in 16 on pure chance — the bar is the same three-in-four)
+      const runs = Array.from({ length: 12 }, () => runSurvival(d));
       const killed = runs.filter((r) => !r.survived);
-      expect(killed.length, `difficulty ${d}: idle target escaped ${runs.length} rounds`).toBeGreaterThanOrEqual(3);
+      expect(killed.length, `difficulty ${d}: idle target escaped ${runs.length - killed.length}/${runs.length} rounds`).toBeGreaterThanOrEqual(9);
       // sudden death (45s) plus the burn timer bounds any straggler round
-      for (const r of killed) expect(r.seconds).toBeLessThan(60);
+      expect(median(killed.map((r) => r.seconds))).toBeLessThan(45);
+      for (const r of killed) expect(r.seconds).toBeLessThan(75);
     }
   });
 
   it('Spicy kills an idle target faster than Chill', () => {
-    const chill = Array.from({ length: 5 }, () => runSurvival(0).seconds);
-    const spicy = Array.from({ length: 5 }, () => runSurvival(2).seconds);
+    const chill = Array.from({ length: 24 }, () => runSurvival(0).seconds);
+    const spicy = Array.from({ length: 24 }, () => runSurvival(2).seconds);
     expect(median(spicy)).toBeLessThan(median(chill) + 5);
   });
 });
 
 describe('counterplay', () => {
   it('reactive dodging buys real time against Chill bots', () => {
-    const idle = Array.from({ length: 8 }, () => runSurvival(0).seconds);
-    const dodge = Array.from({ length: 8 }, () => runSurvival(0, reactiveDodger).seconds);
+    // survival times are heavy-tailed, so the medians need a decent sample
+    const idle = Array.from({ length: 30 }, () => runSurvival(0).seconds);
+    const dodge = Array.from({ length: 30 }, () => runSurvival(0, reactiveDodger).seconds);
     // skilled defence must clearly outlive a statue on the easiest tier
     expect(median(dodge)).toBeGreaterThan(median(idle) * 1.5);
   });
@@ -62,17 +66,19 @@ describe('counterplay', () => {
   it('a committed 1v1 melee rush is a fair duel, not a death sentence', () => {
     // The complaint this guards: walking up to slice a bot used to be near
     // guaranteed suicide (close-range snap throws + sub-human melee counters).
-    // Measured duel win rates sit around 95%/55%/65% (Chill/Normal/Spicy);
-    // margins below are generous to absorb the sim's randomness.
+    // Measured duel win rates (N=400) sit around 72%/61%/46% for
+    // Chill/Normal/Spicy — a "win" now means surviving the finishing beat
+    // too, so a trade is a DOUBLE KO, not a victory. Margins are generous
+    // and the sample large enough that chance alone won't trip them.
     const WANT: Array<[0 | 1 | 2, number]> = [
-      [0, 4], // Chill: at least 4/8
-      [1, 2], // Normal: at least 2/8
-      [2, 2], // Spicy: at least 2/8
+      [0, 30], // Chill: at least half
+      [1, 15], // Normal: at least a quarter
+      [2, 15], // Spicy: at least a quarter
     ];
     for (const [d, minWins] of WANT) {
-      const runs = Array.from({ length: 8 }, () => runRusher(d));
+      const runs = Array.from({ length: 60 }, () => runRusher(d));
       const wins = runs.filter((r) => r.survived).length;
-      expect(wins, `difficulty ${d}: rusher won only ${wins}/8 duels`).toBeGreaterThanOrEqual(minWins);
+      expect(wins, `difficulty ${d}: rusher won only ${wins}/60 duels`).toBeGreaterThanOrEqual(minWins);
     }
   });
 });

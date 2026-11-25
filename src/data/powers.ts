@@ -25,7 +25,7 @@ export const POWERS: Record<string, Power> = {
   BAMBOOZLE: { name: 'Bamboozle', color: '#b06bff', desc: 'Controls inverted! Walk it off' },
   DISGUISE: { name: 'Disguise', color: '#9bd17a', desc: 'Stand still to become scenery' },
   COOLWALK: { name: 'Cool Walk', color: '#8fe6ff', desc: 'Leave a chilling ice trail' },
-  WEAKARM: { name: 'Weak Arm', color: '#b0a0c0', desc: 'Throw range halved. Ouch' },
+  HEAVY: { name: 'Heavyweight', color: '#d9b382', desc: "Can't be shoved — and you shove harder" },
   DECOY: { name: 'Decoy', color: '#7ad0ff', desc: 'Dashing drops a body double' },
   DELAYED: { name: 'Delayed Death', color: '#c9b8ff', desc: '2s of borrowed time when slain' },
   PHASE: { name: 'Phase Dash', color: '#b6f0ff', desc: 'Dash straight through walls' },
@@ -47,9 +47,9 @@ export const EXCLUSIVE_GROUPS: PowerKey[][] = [
 ];
 
 /**
- * Anti-powerups (BAMBOOZLE inverts controls; WEAKARM halves throw range) are
- * never the first book spawned in a match, so a new player isn't immediately
- * punished by a mystery downgrade. BATTLE (Battle Royale) is held back too —
- * it's a match-warping global event, not something to drop on an empty arena.
+ * The BAMBOOZLE anti-power (inverted controls) is never the first book
+ * spawned in a match, so a new player isn't immediately punished by a mystery
+ * downgrade. BATTLE (Battle Royale) is held back too — it's a match-warping
+ * global event, not something to drop on an empty arena.
  */
-export const NEVER_FIRST: PowerKey[] = ['BAMBOOZLE', 'WEAKARM', 'BATTLE'];
+export const NEVER_FIRST: PowerKey[] = ['BAMBOOZLE', 'BATTLE'];

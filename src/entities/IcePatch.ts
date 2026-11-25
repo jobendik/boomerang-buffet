@@ -16,6 +16,7 @@ export class IcePatch {
   life: number;
   max: number;
   r: number;
+  readonly kind = 'ice' as const;
 
   constructor(x: number, y: number, owner: Player) {
     this.x = x;

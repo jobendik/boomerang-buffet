@@ -2,9 +2,10 @@ import { ctx } from '../core/canvas';
 import { clamp, rand, TAU } from '../core/math';
 import { roundRectPath } from '../gfx/shapes';
 import { fontD } from '../ui/widgets';
+import { setFace } from '../data/characters';
 import type { Char, Vec2 } from '../types';
 
-export type ParticleKind = 'spark' | 'chunk' | 'ring' | 'text' | 'confetti' | 'half' | 'ghost';
+export type ParticleKind = 'spark' | 'chunk' | 'ring' | 'text' | 'confetti' | 'half' | 'ghost' | 'streak' | 'flash' | 'cut' | 'soul';
 
 /** A short-lived visual effect particle (spark, food chunk, expanding ring,
  *  floating popup text, a fluttering confetti snip, a tumbling sliced body
@@ -60,7 +61,13 @@ export class Particle {
   /** @returns whether the particle is still alive after this step. */
   update(dt: number): boolean {
     this.life -= dt;
-    if (this.kind === 'ghost') return this.life > 0; // holds its pose, just fades
+    if (this.kind === 'ghost' || this.kind === 'flash' || this.kind === 'cut') return this.life > 0; // holds its pose, just fades
+    if (this.kind === 'soul') {
+      // a departing spirit: wafts upward with a lazy sway
+      this.y += this.vy * dt;
+      this.x += Math.sin(this.life * 7) * 22 * dt;
+      return this.life > 0;
+    }
     if (this.kind === 'half') {
       // a sliced body half: sails apart from the cut, tumbling under gravity
       this.x += this.vx * dt;
@@ -120,6 +127,67 @@ export class Particle {
       ctx.globalAlpha = a * 0.35;
       ctx.translate(this.x, this.y);
       this.char.draw(this.char, this.size, this.aimV);
+      ctx.restore();
+    } else if (this.kind === 'soul' && this.char) {
+      // the departed, drifting heavenward: a pale see-through copy with a halo
+      const k = 1 - this.life / this.max;
+      ctx.save();
+      ctx.globalAlpha = Math.min(0.5, a * 1.2) * Math.min(1, k * 6);
+      ctx.translate(this.x, this.y);
+      ctx.scale(0.8, 0.8);
+      setFace('ko');
+      this.char.draw(this.char, this.size, [0, -0.4]);
+      setFace('idle');
+      ctx.strokeStyle = '#ffe9a8';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(0, -this.size * 1.45, this.size * 0.6, this.size * 0.2, 0, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    } else if (this.kind === 'streak') {
+      // a spark drawn as a short line along its velocity
+      const l = Math.hypot(this.vx, this.vy) || 1;
+      const len = Math.min(18, l * 0.045) * a;
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = this.size * a;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      ctx.lineTo(this.x - (this.vx / l) * len, this.y - (this.vy / l) * len);
+      ctx.stroke();
+    } else if (this.kind === 'flash') {
+      // a four-point hit star that snaps open and vanishes
+      const k = 1 - a;
+      const R = this.size * (0.5 + k * 0.7);
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rot);
+      ctx.fillStyle = this.color;
+      ctx.globalAlpha = a;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * TAU;
+        const rr = i % 2 ? R * 0.22 : i % 4 === 0 ? R : R * 0.55;
+        ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (this.kind === 'cut') {
+      // the slice itself: a long white sliver along the blow, there for a blink
+      const k = 1 - a;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rot);
+      ctx.fillStyle = this.color;
+      ctx.globalAlpha = Math.min(1, a * 1.6);
+      const L = this.size * (0.5 + k * 0.9);
+      const Wd = 5 * a + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(-L, 0);
+      ctx.quadraticCurveTo(0, -Wd, L, 0);
+      ctx.quadraticCurveTo(0, Wd, -L, 0);
+      ctx.fill();
       ctx.restore();
     } else if (this.kind === 'chunk') {
       ctx.save();

@@ -93,6 +93,10 @@ export interface Golden {
   y: number;
   carrier: Player | null;
   bob: number;
+  vx: number; // a fumbled artifact skitters before settling
+  vy: number;
+  lockFor: Player | null; // the fumbler can't simply scoop it straight back up…
+  lockT: number; // …for this long
 }
 
 /**
@@ -112,6 +116,49 @@ export interface BattleRoyale {
   dur: number; // total lifetime before the zone reopens
 }
 
+/** One line of the kill feed: who got whom, how, and any trick-shot callout. */
+export interface FeedItem {
+  killer: Player | null; // null = nobody to blame but themselves
+  victim: Player;
+  cause: string; // a `KillCause` — picks the glyph between the two faces
+  tag?: string;
+  t: number; // age in seconds
+}
+
+/**
+ * Presentation camera. The arena always fits the screen, so this is purely
+ * for feel: a directional kick along heavy blows and a slow push-in on the
+ * round-deciding kill. Never affects the simulation.
+ */
+export interface Camera {
+  kx: number; // current kick offset (px), springs back to 0
+  ky: number;
+  focusX: number; // where the finishing blow landed
+  focusY: number;
+  punch: number; // 1 → 0 envelope of the finishing push-in
+  zoom: number; // smoothed zoom actually applied this frame
+}
+
+/** A spring-loaded round bumper's live state (see `Arena.bumpers`). */
+export interface BumperState {
+  x: number;
+  y: number;
+  r: number;
+  flash: number; // remaining glow after a hit
+}
+
+/** A bush's live state: bushes can be set ablaze and burn away for the round. */
+export interface BushState {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  burnT: number; // > 0 while burning
+  burnt: boolean; // reduced to a charred stump — no cover left
+  shake: number; // 1 → 0 rustle when something moves through the leaves
+  by: Player | null; // who lit it (owns the flames it spits)
+}
+
 export interface GameState {
   state: GamePhase;
   menuPage: MenuPage; // which menu screen is showing while state === 'menu'
@@ -125,6 +172,16 @@ export interface GameState {
   decoys: Decoy[]; // DECOY clones currently fooling the bots
   switches: SwitchState[]; // live floor switches for the current arena
   gates: GateState[]; // live gates, opened by their switches
+  bumpers: BumperState[]; // live bumpers for the current arena
+  bushes: BushState[]; // live (burnable) bushes for the current arena
+  feed: FeedItem[]; // recent kills, newest last
+  cam: Camera;
+  finishing: boolean; // the round is decided — playing out its last beat in slow-mo
+  finishT: number; // real seconds left of that beat before the result is called
+  showdown: boolean; // the round has come down to its final two
+  showdownT: number; // remaining life of the "SHOWDOWN!" splash
+  reduceFx: boolean; // accessibility: tone down shake, flashes and camera moves
+  ghosts: boolean; // fallen fighters haunt the rest of the round
   decals: Decal[]; // fading floor marks (scorches, frost)
   toasts: Toast[]; // power-pickup notices for the human player
   raining: boolean; // weather: douses fire on contact (pit-free maps only)
@@ -185,6 +242,16 @@ export const game: GameState = {
   decoys: [],
   switches: [],
   gates: [],
+  bumpers: [],
+  bushes: [],
+  feed: [],
+  cam: { kx: 0, ky: 0, focusX: 512, focusY: 320, punch: 0, zoom: 1 },
+  finishing: false,
+  finishT: 0,
+  showdown: false,
+  showdownT: 0,
+  reduceFx: false,
+  ghosts: true,
   decals: [],
   toasts: [],
   raining: false,
@@ -221,6 +288,47 @@ export const game: GameState = {
   pickupsSpawned: 0,
   roundNum: 0,
 };
+
+/** Lurch the camera along a blow's direction (decays on its own in `update`). */
+export function kick(dx: number, dy: number, amount: number): void {
+  const l = Math.hypot(dx, dy);
+  if (l < 0.001) return;
+  const k = game.reduceFx ? 0.3 : 1;
+  game.cam.kx += (dx / l) * amount * k;
+  game.cam.ky += (dy / l) * amount * k;
+}
+
+/**
+ * Free-running event counters ("kill:pit", "tag:BANK SHOT!", "parry" …).
+ * Nothing in the game reads them — they exist for the headless sim lab
+ * (tests/lab.test.ts), which resets the table and compares rates across
+ * design experiments.
+ */
+export const tele: Record<string, number> = {};
+export function tally(key: string, n = 1): void {
+  tele[key] = (tele[key] ?? 0) + n;
+}
+
+/** Append a line to the kill feed (capped; ages out in `update`). */
+export function pushFeed(killer: Player | null, victim: Player, cause: string, tag?: string): void {
+  tally('kill');
+  tally('kill:' + cause);
+  if (!killer) tally('kill:self');
+  // "RALLY x3 KILL!" etc. collapse to one bucket
+  if (tag) tally('tag:' + tag.replace(/x\d+/, 'xN'));
+  game.feed.push({ killer, victim, cause, tag, t: 0 });
+  if (game.feed.length > 5) game.feed.shift();
+}
+
+/** Would `victim` dying right now settle the round? (They're already marked
+ *  dead when this is asked.) Drives the finishing slow-mo and camera. */
+export function roundDecidedBy(victim: Player): boolean {
+  if (game.players.length < 2 || game.mode === 2) return false;
+  const alive = game.players.filter((q) => q.alive && q !== victim);
+  if (game.mode === 3) return !alive.some((q) => q.role === 'hider') || victim.role === 'seeker';
+  if (game.mode === 1) return new Set(alive.map((q) => q.team)).size <= 1;
+  return alive.length <= 1;
+}
 
 /**
  * Make sure no two active human slots (0..numHumans-1) are assigned the same
@@ -260,6 +368,7 @@ export function sanitizeCharSel(maxIdx: number): void {
 
 const SAVE_KEY = 'boomerang-buffet-settings-v1';
 const SAVED_NUMBER_FIELDS = ['numPlayers', 'numHumans', 'difficulty', 'target', 'arenaSel', 'mode', 'fallProtect'] as const;
+const SAVED_BOOL_FIELDS = ['reduceFx', 'ghosts'] as const;
 const SAVED_ARRAY_FIELDS = ['charSel', 'controlSchemes'] as const;
 
 /** Persist the menu selections so a returning player keeps their setup. */
@@ -268,6 +377,7 @@ export function saveSettings(): void {
     const out: Record<string, number | number[]> = {};
     for (const k of SAVED_NUMBER_FIELDS) out[k] = game[k];
     for (const k of SAVED_ARRAY_FIELDS) out[k] = game[k];
+    for (const k of SAVED_BOOL_FIELDS) out[k] = game[k] ? 1 : 0;
     localStorage.setItem(SAVE_KEY, JSON.stringify(out));
   } catch {
     /* storage unavailable (private mode etc.) — settings just won't stick */
@@ -288,6 +398,7 @@ export function loadSettings(): void {
       const v = data[k];
       if (Array.isArray(v) && v.every((n) => typeof n === 'number' && Number.isFinite(n))) game[k] = v.slice(0, MAX_HUMANS);
     }
+    for (const k of SAVED_BOOL_FIELDS) if (typeof data[k] === 'number') game[k] = data[k] === 1;
     // clamp into legal ranges in case the save predates a balance change
     game.numPlayers = Math.min(6, Math.max(2, Math.round(game.numPlayers)));
     game.numHumans = Math.min(4, game.numPlayers, Math.max(1, Math.round(game.numHumans)));

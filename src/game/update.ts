@@ -2,13 +2,15 @@ import { audio } from '../core/audio';
 import { BOUNDS, W } from '../constants';
 import { dist, lerp, norm, rand, TAU } from '../core/math';
 import { keys, mouse, readGamepad } from '../core/input';
-import { aiThink } from '../systems/ai';
-import { resolveBoomerangHits, resolveDecoyHits, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
+import { aiThink, ghostThink } from '../systems/ai';
+import { updateBushes } from '../systems/bushes';
+import { inPit, resolveBoomerangClashes, resolveBoomerangHits, resolveDecoyHits, resolveParries, resolvePlayerCollisions, resolveSlashes, spreadFire, updateSwitches } from '../systems/collision';
 import { spawnConfetti, spawnPopText, spawnRing } from '../systems/effects';
 import { POWERS } from '../data/powers';
 import { Particle } from '../entities/Particle';
 import { game } from './state';
-import { endRoundCheck, pickupSpawnChance, spawnPickup, startRound } from './flow';
+import type { GameState } from './state';
+import { endRoundCheck, pickupSpawnChance, spawnPickup, startMatch, startRound } from './flow';
 import type { Intents, Vec2 } from '../types';
 import type { Player } from '../entities/Player';
 
@@ -29,7 +31,7 @@ function updateBattleRoyale(dt: number): void {
     if (!p.alive || p.invuln > 0 || !br.initiator.isEnemy(p)) continue;
     if (dist(p.x, p.y, br.cx, br.cy) > br.r + p.r) {
       const [dx, dy] = norm(p.x - br.cx, p.y - br.cy);
-      p.die(br.initiator, dx, dy, true);
+      p.die(br.initiator, dx, dy, { env: true, pop: 'OUT OF BOUNDS!', cause: 'ring' });
     }
   }
   // embers licking along the closing boundary (only once the ring is on-screen)
@@ -64,9 +66,26 @@ function updateGolden(dt: number): void {
     }
     return;
   }
-  // unheld: the first living fighter to touch it becomes the new carrier
+  // unheld: a fumbled artifact skitters to rest (bouncing off the walls, and
+  // never coming to rest over a pit)…
   g.carrier = null;
+  g.lockT = Math.max(0, g.lockT - dt);
+  if (g.vx || g.vy) {
+    g.x += g.vx * dt;
+    g.y += g.vy * dt;
+    if (g.x < BOUNDS.l + 16 || g.x > BOUNDS.r - 16) g.vx = -g.vx;
+    if (g.y < BOUNDS.t + 16 || g.y > BOUNDS.b - 16) g.vy = -g.vy;
+    g.x = Math.min(BOUNDS.r - 16, Math.max(BOUNDS.l + 16, g.x));
+    g.y = Math.min(BOUNDS.b - 16, Math.max(BOUNDS.t + 16, g.y));
+    const drag = Math.pow(0.04, dt);
+    g.vx *= drag;
+    g.vy *= drag;
+    if (Math.hypot(g.vx, g.vy) < 25 && !inPit(g.x, g.y)) g.vx = g.vy = 0;
+    else if (Math.hypot(g.vx, g.vy) < 25) [g.vx, g.vy] = norm((BOUNDS.l + BOUNDS.r) / 2 - g.x, (BOUNDS.t + BOUNDS.b) / 2 - g.y).map((v) => v * 120);
+  }
+  // …and the first living fighter to touch it becomes the new carrier
   for (const p of game.players) {
+    if (p === g.lockFor && g.lockT > 0) continue;
     if (p.alive && dist(p.x, p.y, g.x, g.y) < p.r + 16) {
       g.carrier = p;
       spawnRing(p.x, p.y, '#ffd23a', 1.3);
@@ -219,21 +238,88 @@ function humanIntents(p: Player, slot: number): Intents {
   }
 }
 
+/* ------------------------------ attract mode ------------------------------ */
+
+let attractPhase: GameState['state'] | null = null;
+let attractRoster: unknown = null;
+
+/**
+ * The title screen's backdrop is the game itself: four Spicy bots playing a
+ * never-ending match, silently, behind the logo. The menu owns `game.state`,
+ * so each frame we lend the simulation its own phase (and a bots-only lobby),
+ * step it once through the ordinary `update`, then hand everything back.
+ */
+function attractStep(dt: number): void {
+  const lobby = { numHumans: game.numHumans, numPlayers: game.numPlayers, mode: game.mode, arenaSel: game.arenaSel, target: game.target, difficulty: game.difficulty };
+  Object.assign(game, { numHumans: 0, numPlayers: 4, mode: 0, arenaSel: -1, target: 99, difficulty: 2 });
+  audio.quiet = true;
+  try {
+    // (re)start whenever the roster isn't ours — first visit, or back from a real match
+    if (!attractPhase || game.players !== attractRoster) {
+      startMatch();
+      attractRoster = game.players;
+      attractPhase = game.state;
+    }
+    game.state = attractPhase;
+    update(dt);
+    attractPhase = game.state === 'matchover' || game.state === 'menu' ? null : game.state;
+  } finally {
+    game.state = 'menu';
+    audio.quiet = false;
+    Object.assign(game, lobby);
+  }
+}
+
 export function update(dt: number): void {
   // Esc pause: hold the whole sim (render keeps presenting the frozen frame)
   if (game.paused) return;
 
+  // menus: the title runs its attract match; the other pages just tick the clock
+  if (game.state === 'menu') {
+    if (game.menuPage === 'title') attractStep(dt);
+    else game.time += dt;
+    return;
+  }
+
   const raw = dt;
   // cinematic slow-mo (round-deciding kills): the timer burns in real time
   // while everything below — including particles & visuals — runs at 30%.
-  if (game.state === 'playing' && game.slowmo > 0) {
+  const slow = game.state === 'playing' && game.slowmo > 0;
+  if (slow) {
     game.slowmo = Math.max(0, game.slowmo - raw);
-    dt *= 0.3;
+    // ease back up to speed over the last stretch instead of snapping
+    dt *= game.slowmo > 0.2 ? 0.3 : lerp(1, 0.3, game.slowmo / 0.2);
   }
   game.time += dt;
   game.shake = Math.max(0, game.shake - dt * 40);
   game.flash = Math.max(0, game.flash - dt);
   if (game.fightT > 0) game.fightT = Math.max(0, game.fightT - raw);
+  if (game.showdownT > 0) game.showdownT = Math.max(0, game.showdownT - raw);
+  if (game.finishT > 0) game.finishT = Math.max(0, game.finishT - raw);
+
+  // presentation camera: the kick springs home; the finishing push-in swells
+  // quickly, holds through the slow-mo, then eases back out
+  const cam = game.cam;
+  const spring = Math.pow(0.0004, raw);
+  cam.kx *= spring;
+  cam.ky *= spring;
+  if (cam.punch > 0) cam.punch = Math.max(0, cam.punch - raw / 1.5);
+  const zoomGoal = game.reduceFx ? 1 : 1 + 0.2 * Math.min(1, cam.punch * 4);
+  cam.zoom = lerp(cam.zoom, zoomGoal, 1 - Math.pow(cam.zoom < zoomGoal ? 0.0005 : 0.03, raw));
+
+  // the music breathes with the match: sagging under a finishing slow-mo,
+  // a touch quicker in a showdown, quicker still under sudden death
+  const inRound = game.state === 'playing';
+  audio.setMusicMood(slow && game.slowmo > 0.2 ? 0.74 : inRound && game.sudden ? 1.07 : inRound && game.showdown ? 1.035 : 1, slow && game.slowmo > 0.2 ? 1000 : 20000);
+  // the charge whine follows the most wound-up human
+  let wind = 0;
+  if (inRound) for (const p of game.players) if (!p.isAI && p.alive && p.charging) wind = Math.max(wind, p.charge);
+  audio.chargeTone(wind);
+
+  // age the kill feed
+  for (const f of game.feed) f.t += raw;
+  if (game.feed.length && game.feed[0].t > 5) game.feed.shift();
+  for (const b of game.bumpers) b.flash = Math.max(0, b.flash - dt);
 
   // age the power-pickup toasts & floor decals
   for (const t of game.toasts) t.t += raw;
@@ -241,7 +327,6 @@ export function update(dt: number): void {
   for (const d of game.decals) d.t -= dt;
   game.decals = game.decals.filter((d) => d.t > 0);
 
-  if (game.state === 'menu') return;
   if (game.state === 'matchover') {
     // confetti drifts over the podium for as long as the screen is up
     if (Math.random() < 0.2) spawnConfetti(rand(W * 0.1, W * 0.9), -14, 2);
@@ -279,13 +364,15 @@ export function update(dt: number): void {
     if (Math.ceil(game.countdownT) < before && game.countdownT > 0) audio.pip(); // 3…2…1 blips
     if (game.countdownT <= 0) {
       game.state = 'playing';
-      game.fightT = 0.8; // "FIGHT!" splash
+      game.fightT = 0.7; // "FIGHT!" splash
       audio.fight();
     }
   }
 
+  // hit-stop is a REAL-time freeze: counted in unscaled seconds, so a kill's
+  // slow-mo starts after the freeze instead of being swallowed by it
   if (game.hitstop > 0) {
-    game.hitstop -= dt;
+    game.hitstop -= raw;
     if (game.state === 'playing') return;
   }
 
@@ -371,20 +458,37 @@ export function update(dt: number): void {
     // players
     for (let i = 0; i < game.players.length; i++) {
       const p = game.players[i];
-      if (!p.alive) continue;
+      if (!p.alive) {
+        // the fallen haunt on (FFA & Team Up only — the objective modes have
+        // their own rhythms)
+        if (game.ghosts && game.mode <= 1) {
+          audio.emitX = p.gx;
+          p.updateGhost(dt, p.isAI ? ghostThink(p) : humanIntents(p, i));
+        }
+        continue;
+      }
       let intents = p.isAI ? aiThink(p, dt) : humanIntents(p, i);
       // a blinded seeker is rooted in place during the setup window
       if (p === seeker && game.hsSetup > 0) intents = { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
+      audio.emitX = p.x; // everything this fighter triggers is panned to them
       p.update(dt, intents);
     }
+    audio.emitX = null;
     resolvePlayerCollisions(); // soft separation + frozen-shatter-on-bump
     updateSwitches(); // floor switches drive their gates + the "Switcheroo" award
     for (const c of game.crushers) c.update(dt); // move blocks + squish the pinned
     spreadFire(); // burning fighters ignite their neighbours
     updateGolden(dt); // Golden Boomerang carry/score (no-op in other modes)
     updateBattleRoyale(dt); // shrinking lethal border (no-op unless triggered)
+    updateBushes(dt); // burnable cover
     // boomerangs
-    for (const b of game.boomerangs) b.update(dt);
+    for (const b of game.boomerangs) {
+      audio.emitX = b.x;
+      b.update(dt);
+    }
+    audio.emitX = null;
+    resolveBoomerangClashes(dt); // rival throws clang off each other mid-air
+    resolveParries(); // swings bat boomerangs away — before hits, so ties favour the defender
     resolveBoomerangHits();
     resolveSlashes();
     if (seeker && seeker.stats.kills > seekerKillsBefore) seeker.attemptsLeft += seeker.stats.kills - seekerKillsBefore;
@@ -401,12 +505,26 @@ export function update(dt: number): void {
     game.decoys = game.decoys.filter((d) => d.life > 0);
     // hazards
     game.hazards = game.hazards.filter((h) => h.update(dt));
+    if (game.hazards.length > MAX_HAZARDS) game.hazards.splice(0, game.hazards.length - MAX_HAZARDS); // oldest patches go first
     // pickups
     game.pickups = game.pickups.filter((pk) => pk.update(dt));
     // cleanup dead boomerangs
     game.boomerangs = game.boomerangs.filter((b) => !b.dead);
 
+    // SHOWDOWN: the moment a brawl boils down to its last two
+    if (!game.showdown && game.mode <= 1 && game.players.length > 2) {
+      const left = game.players.filter((q) => q.alive);
+      if (left.length === 2 && left[0].isEnemy(left[1])) {
+        game.showdown = true;
+        game.showdownT = 1.8;
+        audio.showdown();
+      }
+    }
+
+    const wasFinishing = game.finishing;
     endRoundCheck();
+    // the instant a round is decided: slow everything down for its last beat
+    if (game.finishing && !wasFinishing) game.slowmo = Math.max(game.slowmo, 0.8);
   }
 
   if (game.state === 'roundover') {
@@ -427,4 +545,14 @@ export function update(dt: number): void {
   }
 
   game.particles = game.particles.filter((p) => p.update(dt));
+  // Budget: a six-way brawl with stacked fire powers can ask for thousands of
+  // embers. Past the cap the oldest plain sparks are dropped first (the
+  // storytelling particles — halves, text, rings, souls — always survive).
+  if (game.particles.length > MAX_PARTICLES) {
+    let excess = game.particles.length - MAX_PARTICLES;
+    game.particles = game.particles.filter((p) => !(excess > 0 && (p.kind === 'spark' || p.kind === 'streak' || p.kind === 'chunk') && excess--));
+  }
 }
+
+const MAX_PARTICLES = 900;
+const MAX_HAZARDS = 220;

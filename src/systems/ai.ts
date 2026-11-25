@@ -1,7 +1,11 @@
 import { clamp, dist, dist2, lerp, norm, rand } from '../core/math';
+import { BOUNDS } from '../constants';
 import { OBSTACLES, PITS } from '../data/arena';
+import { PERSONAS } from '../data/characters';
 import { game } from '../game/state';
-import type { Intents } from '../types';
+import { circleRect, inPit, nearPit, pitNormal } from './collision';
+import { throwParams } from '../entities/Player';
+import type { Intents, Rect } from '../types';
 import type { Player } from '../entities/Player';
 
 /** CPU fighter behaviour: targeting, kiting, pickup-seeking and dodging. */
@@ -24,9 +28,13 @@ interface AITuning {
   meleeWindup: [number, number]; // telegraphed pause before a point-blank slash
   cqHesitate: number; // odds a close-quarters (<150px) throw is fumbled/delayed
   jumpDodge: boolean; // whether the bot may hop over throws
+  craft: number; // odds a throw is PLANNED (curve-compensated / banked) rather than flung
+  shove: number; // appetite for dash tackles when one looks good
+  recover: [number, number, number]; // knocked back: odds of reacting, then latency min/max
+  temper: number; // 0..1 — how fully a bot's temperament overrides the default spacing
 }
 
-const TUNING: AITuning[] = [
+export const TUNING: AITuning[] = [
   {
     // Chill — sluggish reflexes, wobbly aim, generous openings
     reactTime: [0.6, 0.9],
@@ -41,6 +49,10 @@ const TUNING: AITuning[] = [
     meleeWindup: [0.45, 0.7],
     cqHesitate: 0.7,
     jumpDodge: false,
+    craft: 0.05,
+    shove: 0.2,
+    recover: [0.3, 0.2, 0.32],
+    temper: 0.3,
   },
   {
     // Normal — competent but human-ish: readable delays, occasional whiffs
@@ -56,6 +68,10 @@ const TUNING: AITuning[] = [
     meleeWindup: [0.28, 0.46],
     cqHesitate: 0.55,
     jumpDodge: true,
+    craft: 0.2,
+    shove: 0.35,
+    recover: [0.6, 0.1, 0.2],
+    temper: 0.7,
   },
   {
     // Spicy — sharp but still fallible (never frame-perfect)
@@ -71,8 +87,135 @@ const TUNING: AITuning[] = [
     meleeWindup: [0.24, 0.38],
     cqHesitate: 0.5,
     jumpDodge: true,
+    craft: 0.55,
+    shove: 0.7,
+    recover: [0.9, 0.05, 0.12],
+    temper: 1,
   },
 ];
+
+/* ------------------------------ shot planning ----------------------------- */
+
+interface ShotPlan {
+  ang: number;
+  charge: number;
+  bounces: number;
+}
+
+/**
+ * Fly one candidate throw through the real flight maths (the same numbers a
+ * human's charge preview draws) and report how close it passes to where the
+ * target is heading. Bounces off the arena walls and solid blocks are
+ * followed, so a "miss" off a wall can score as a hit — that's a bank shot.
+ */
+function flyCandidate(p: Player, ang: number, charge: number, side: number, tx: number, ty: number, tvx: number, tvy: number, solids: Rect[]): { miss: number; bounces: number; t: number } {
+  const tp = throwParams(charge, p.powers.has('BIG'));
+  const curve = tp.curve * side;
+  const step = 1 / 36;
+  const R = 11;
+  let vx = Math.cos(ang) * tp.speed;
+  let vy = Math.sin(ang) * tp.speed;
+  let x = p.x + Math.cos(ang) * (p.r + 6);
+  let y = p.y + Math.sin(ang) * (p.r + 6);
+  let best = Infinity;
+  let bestT = 0;
+  let bestB = 0;
+  let bounces = 0;
+  const c = Math.cos(curve * step);
+  const s = Math.sin(curve * step);
+  for (let t = 0; t < tp.outT; t += step) {
+    const nvx = vx * c - vy * s;
+    vy = vx * s + vy * c;
+    vx = nvx;
+    x += vx * step;
+    y += vy * step;
+    if (x < BOUNDS.l + R) {
+      x = BOUNDS.l + R;
+      vx = Math.abs(vx);
+      bounces++;
+    } else if (x > BOUNDS.r - R) {
+      x = BOUNDS.r - R;
+      vx = -Math.abs(vx);
+      bounces++;
+    }
+    if (y < BOUNDS.t + R) {
+      y = BOUNDS.t + R;
+      vy = Math.abs(vy);
+      bounces++;
+    } else if (y > BOUNDS.b - R) {
+      y = BOUNDS.b - R;
+      vy = -Math.abs(vy);
+      bounces++;
+    }
+    for (const Rc of solids) {
+      const h = circleRect(x, y, R, Rc);
+      if (h.hit) {
+        x += h.nx! * h.pen!;
+        y += h.ny! * h.pen!;
+        const dot = vx * h.nx! + vy * h.ny!;
+        vx -= 2 * dot * h.nx!;
+        vy -= 2 * dot * h.ny!;
+        bounces++;
+      }
+    }
+    // the mark keeps (half) walking the way they were going
+    const d = Math.hypot(x - (tx + tvx * t * 0.5), y - (ty + tvy * t * 0.5));
+    if (d < best) {
+      best = d;
+      bestT = t;
+      bestB = bounces;
+    }
+  }
+  return { miss: best, bounces: bestB, t: bestT };
+}
+
+/**
+ * Plan a throw the way a practised player would: picture a spread of angles
+ * and charges, keep the one that actually arrives. This is what lets a bot
+ * bend one round a pillar or bank it off the back wall — and it's honest: it
+ * uses only what a human's own aiming preview shows, then the tier's aim
+ * error is smeared on top. `flair` > 0 makes ricochets attractive.
+ */
+function planThrow(p: Player, tx: number, ty: number, tvx: number, tvy: number, flair: number): ShotPlan | null {
+  if (p.powers.has('TELEKINESIS')) return null; // piloted throws need no plan
+  const solids = game.gates.length ? [...OBSTACLES, ...game.gates.filter((g) => !g.open)] : OBSTACLES;
+  const base = Math.atan2(ty - p.y, tx - p.x);
+  let best: ShotPlan | null = null;
+  let bestScore = Infinity;
+  for (const charge of [0.2, 0.45, 0.7, 1]) {
+    for (let k = -8; k <= 8; k++) {
+      const ang = base + k * 0.125;
+      // which way it will bank depends on how we're moving as we let go
+      const cross = Math.cos(ang) * p.vy - Math.sin(ang) * p.vx;
+      const side = Math.hypot(p.vx, p.vy) > 40 && Math.abs(cross) > 30 ? Math.sign(cross) : 1;
+      const r = flyCandidate(p, ang, charge, side, tx, ty, tvx, tvy, solids);
+      if (r.miss > 20) continue;
+      // nearer & sooner is better; ricochets cost a little — unless we love them
+      const score = r.miss + r.t * 14 + r.bounces * (7 - flair * 12);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { ang, charge, bounces: r.bounces };
+      }
+    }
+  }
+  return best;
+}
+
+/** Would shoving `q` along (dx, dy) send them somewhere they won't walk back from? */
+function shoveIsDeadly(q: Player, dx: number, dy: number): boolean {
+  for (const reach of [70, 125]) {
+    const x = q.x + dx * reach;
+    const y = q.y + dy * reach;
+    if (inPit(x, y)) return game.fallProtect !== 2;
+    for (const c of game.crushers) if (x > c.x - 10 && x < c.x + c.w + 10 && y > c.y - 10 && y < c.y + c.h + 10) return true;
+    for (const hz of game.hazards) if (dist(hz.x, hz.y, x, y) < 26) return true;
+    if (game.sudden) {
+      const e = game.suddenEnc;
+      if (x < BOUNDS.l + e || x > BOUNDS.r - e || y < BOUNDS.t + e || y > BOUNDS.b - e) return true;
+    }
+  }
+  return false;
+}
 
 function lineHitsObstacle(x1: number, y1: number, x2: number, y2: number): boolean {
   // coarse: sample
@@ -84,6 +227,7 @@ function lineHitsObstacle(x1: number, y1: number, x2: number, y2: number): boole
     for (const R of OBSTACLES) {
       if (px > R.x - 4 && px < R.x + R.w + 4 && py > R.y - 4 && py < R.y + R.h + 4) return true;
     }
+    for (const B of game.bumpers) if (dist2(px, py, B.x, B.y) < (B.r + 6) * (B.r + 6)) return true;
     // closed gates block line of sight too (an open one is passable)
     for (const g of game.gates) {
       if (!g.open && px > g.x - 4 && px < g.x + g.w + 4 && py > g.y - 4 && py < g.y + g.h + 4) return true;
@@ -100,7 +244,10 @@ function validTarget(p: Player, q: Player): boolean {
 export function aiThink(p: Player, dt: number): Intents {
   const a = p.ai;
   const tune = TUNING[clamp(game.difficulty, 0, 2)];
+  const persona = PERSONAS[p.char.persona];
   a.tThink -= dt;
+  a.shoveT -= dt;
+  a.tackleT -= dt;
   a.tThrow -= dt;
   a.tStrafe -= dt;
 
@@ -219,7 +366,15 @@ export function aiThink(p: Player, dt: number): Intents {
     intents.aimX = trueAim[0] * ce - trueAim[1] * se;
     intents.aimY = trueAim[0] * se + trueAim[1] * ce;
 
-    const idealDist = a.range * (1 - 0.6 * agg); // bloodlust closes the gap
+    // Temperament sets the spacing — but only as far as the tier allows: the
+    // easier the bots, the more everyone drifts back to a polite middle
+    // distance (measured: close-in brawlers were the one thing that made
+    // Chill noticeably deadlier, so Chill keeps its manners).
+    const spacing = lerp(245, a.range, tune.temper);
+    let idealDist = spacing * (1 - 0.6 * agg); // bloodlust closes the gap
+    // a foe caught empty-handed is an invitation: the hot-headed walk right
+    // in for the slice instead of trading throws from range
+    if (best && !phantom && p.armed && !best.armed && persona.rush > 0) idealDist = lerp(idealDist, 46, persona.rush * 0.85);
     if (pick && Math.sqrt(pd) < 260 && p.powers.size < 3) {
       const [gx, gy] = norm(pick.x - p.x, pick.y - p.y);
       mvx = gx;
@@ -266,12 +421,52 @@ export function aiThink(p: Player, dt: number): Intents {
       a.meleeT = -1; // foe slipped out of range — the windup is wasted
     }
 
+    // DASH TACKLE. Barging a rival sends them sliding — so the moment to do
+    // it is when that slide ends somewhere nasty (a pit, a piston, the
+    // flames), or to spoil a wind-up, or simply because nobody here is
+    // holding a boomerang and a shoving match is all that's left.
+    if (best && !phantom && p.dashCd <= 0 && a.shoveT <= 0 && d > 44 && d < 126 && !best.airborne && best.frozen <= 0 && p.stagger <= 0) {
+      a.shoveT = 0.3;
+      let want = 0;
+      if (shoveIsDeadly(best, tx, ty)) want = 1.3;
+      else if (best.isGoldCarrier) want = 0.9; // knock the Golden Boomerang loose
+      else if (!p.armed && best.charging) want = 0.5;
+      else if (!p.armed && !best.armed) want = 0.22;
+      else if (!p.armed) want = 0.06;
+      // never barge off a ledge ourselves if the mark steps aside
+      const ownLanding = inPit(p.x + tx * 96, p.y + ty * 96) && game.fallProtect !== 2;
+      if (p.powers.has('HEAVY')) want = Math.max(want, 0.35) * 1.5; // built for it
+      if (!ownLanding && !lineHitsObstacle(p.x, p.y, best.x, best.y) && Math.random() < want * tune.shove * persona.shove) {
+        a.tackleT = 0.2;
+        intents.dash = true;
+      }
+    }
+
     // throw decision. Close quarters are governed separately: the old blind
     // point-blank release (no facing check inside 200px) was a ~0.2s
     // unreactable dart — the single biggest reason walking up for a slice
     // felt like suicide. Now a close throw needs real facing, gets fumbled a
     // difficulty-scaled share of the time, and costs a longer reset after.
-    if (p.hasBoomerang && a.tThrow <= 0 && d < tune.throwRange && !lineHitsObstacle(p.x, p.y, tgX, tgY)) {
+    // A share of throws (by tier and temperament) are PLANNED: the bot
+    // pictures the flight — curve, walls and all — and lets fly the one that
+    // arrives. That's the sharpshooter bending it round a pillar, or the
+    // trickster banking one off the back wall at a foe with no line of sight.
+    let planned = false;
+    if (p.hasBoomerang && a.tThrow <= 0 && d > 150 && d < tune.throwRange + 60 && Math.random() < tune.craft * persona.craft) {
+      const plan = planThrow(p, tgX, tgY, tgVx, tgVy, p.char.persona === 'trickster' ? 1 : p.char.persona === 'sniper' ? 0.4 : 0);
+      if (plan) {
+        const ang = plan.ang + a.aimErr * 0.6;
+        intents.aimX = Math.cos(ang);
+        intents.aimY = Math.sin(ang);
+        intents.throwNow = true;
+        intents.charge = clamp(plan.charge + rand(-tune.chargeErr, tune.chargeErr) * 0.3, 0.15, 1);
+        a.tThrow = rand(tune.throwCd[0], tune.throwCd[1]) * (1 - 0.5 * agg);
+        planned = true;
+      } else {
+        a.tThrow = 0.3; // nothing on — look again in a moment
+      }
+    }
+    if (!planned && p.hasBoomerang && a.tThrow <= 0 && d < tune.throwRange && !lineHitsObstacle(p.x, p.y, tgX, tgY)) {
       const facing = norm(intents.aimX, intents.aimY);
       const dot = facing[0] * tx + facing[1] * ty;
       const close = d < 150;
@@ -310,44 +505,53 @@ export function aiThink(p: Player, dt: number): Intents {
     }
   }
   if (danger) {
-    // Decide ONCE per incoming throw whether we react to it at all. Without this
-    // reaction-miss roll, bots dash/jump-dodge every single boomerang — and since
-    // a dodge grants invulnerability i-frames, they become untouchable and combat
-    // never resolves. Even a committed dodge fires only after a human-like
-    // reaction delay, so a point-blank surprise throw still connects.
+    // Decide ONCE per incoming throw how we'll answer it: stand and PARRY it
+    // back, dodge it, or simply not notice in time. Without the miss roll,
+    // bots dash/jump-dodge every single boomerang — and since a dodge grants
+    // invulnerability i-frames, they become untouchable and combat never
+    // resolves. Even a committed answer fires only after a human-like
+    // reaction delay, so a point-blank surprise throw still connects — and a
+    // rally that has wound the boomerang up fast enough outruns it entirely.
     if (danger !== a.dodgeBoom) {
       a.dodgeBoom = danger;
-      a.dodgeActive = Math.random() < tune.dodgeChance * (1 - 0.45 * agg); // bloodlust trades defence for offence
+      // armed it's the blade; unarmed a bare-handed swat (harder, so rarer)
+      const parryP = danger.unstoppable || p.isHider ? 0 : tune.parryChance * persona.parry * (p.armed ? 1 : 0.6);
+      a.parryRoll = p.slashCd <= 0.2 && Math.random() < parryP;
+      a.dodgeActive = a.parryRoll || Math.random() < tune.dodgeChance * persona.nerve * (1 - 0.45 * agg); // bloodlust trades defence for offence
       a.dodgeDelayT = rand(tune.dodgeDelay[0], tune.dodgeDelay[1]);
-      a.parryRoll = Math.random() < tune.parryChance;
     }
     if (a.dodgeActive) {
       a.dodgeDelayT -= dt;
-      if (a.dodgeDelayT > 0) {
+      const toBoom = norm(danger.x - p.x, danger.y - p.y);
+      if (a.parryRoll && p.slashCd <= 0 && p.slashT <= 0) {
+        // plant, square up to it, and swing as it arrives
+        mvx *= 0.25;
+        mvy *= 0.25;
+        if (a.dodgeDelayT <= 0) {
+          intents.aimX = toBoom[0];
+          intents.aimY = toBoom[1];
+          const sp = Math.hypot(danger.vx, danger.vy);
+          if (ddist < 44 + sp * 0.075) {
+            intents.slash = true;
+            a.parryRoll = false; // one swing per throw
+          }
+        }
+      } else if (a.dodgeDelayT > 0) {
         // saw it — flinching away while the reaction winds up
         mvx += dangerVec[0] * 0.6;
         mvy += dangerVec[1] * 0.6;
+      } else if (p.dashCd <= 0 && ddist < 110) {
+        // dash perpendicular to incoming
+        const perp = [-dangerVec[1], dangerVec[0]];
+        const side = Math.random() < 0.5 ? 1 : -1;
+        mvx = perp[0] * side;
+        mvy = perp[1] * side;
+        intents.dash = true;
+      } else if (tune.jumpDodge && p.airCd <= 0 && p.airT <= 0 && ddist < 90) {
+        intents.jump = true; // dash on cooldown — hop the throw instead
       } else {
-        // slash to clash if close, armed & facing; else dash perpendicular
-        const facing = norm(intents.aimX, intents.aimY);
-        const toBoom = norm(danger.x - p.x, danger.y - p.y);
-        if (ddist < 60 && p.armed && p.slashCd <= 0 && facing[0] * toBoom[0] + facing[1] * toBoom[1] > 0.2 && a.parryRoll) {
-          intents.slash = true;
-          intents.aimX = toBoom[0];
-          intents.aimY = toBoom[1];
-        } else if (p.dashCd <= 0 && ddist < 110) {
-          // dash perpendicular to incoming
-          const perp = [-dangerVec[1], dangerVec[0]];
-          const side = Math.random() < 0.5 ? 1 : -1;
-          mvx = perp[0] * side;
-          mvy = perp[1] * side;
-          intents.dash = true;
-        } else if (tune.jumpDodge && p.airCd <= 0 && p.airT <= 0 && ddist < 90) {
-          intents.jump = true; // dash on cooldown — hop the throw instead
-        } else {
-          mvx += dangerVec[0];
-          mvy += dangerVec[1];
-        }
+        mvx += dangerVec[0];
+        mvy += dangerVec[1];
       }
     }
   } else {
@@ -378,11 +582,9 @@ export function aiThink(p: Player, dt: number): Intents {
 
   // steer away from the lip of any bottomless pit (strong, short-range repulsion)
   for (const P of PITS) {
-    const cx = P.x + P.w / 2;
-    const cy = P.y + P.h / 2;
     const margin = 46;
     if (p.x > P.x - margin && p.x < P.x + P.w + margin && p.y > P.y - margin && p.y < P.y + P.h + margin) {
-      const [ax, ay] = norm(p.x - cx, p.y - cy);
+      const [ax, ay] = pitNormal(P, p.x, p.y);
       mvx += ax * 2.4;
       mvy += ay * 2.4;
     }
@@ -404,7 +606,76 @@ export function aiThink(p: Player, dt: number): Intents {
   // exactly the exploitable flaw the source AI is known for.
   if (p.frozen > 0) intents.dash = true;
 
+  // committed to a tackle: run straight at the mark, whatever else beckons
+  if (a.tackleT > 0 && best) {
+    const [tx, ty] = norm(best.x - p.x, best.y - p.y);
+    mvx = tx;
+    mvy = ty;
+  }
+
+  // KNOCKED BACK. Decide once per shove whether we keep our wits; if so,
+  // after a beat of reaction time, look where the slide is taking us — and
+  // if that's somewhere fatal, dash back against it (or hop the gap).
+  if (p.stagger > 0) {
+    if (a.recState === 0) {
+      a.recState = Math.random() < tune.recover[0] ? 1 : -1;
+      a.recT = rand(tune.recover[1], tune.recover[2]);
+    }
+    if (a.recState === 1) {
+      a.recT -= dt;
+      if (a.recT <= 0) {
+        const fx = p.x + p.vx * 0.28;
+        const fy = p.y + p.vy * 0.28;
+        let doom = game.fallProtect !== 2 && (inPit(fx, fy) || nearPit(p.x + p.vx * 0.14, p.y + p.vy * 0.14, 0));
+        for (const hz of game.hazards) if (dist(hz.x, hz.y, fx, fy) < 24) doom = true;
+        for (const c of game.crushers) if (fx > c.x - 8 && fx < c.x + c.w + 8 && fy > c.y - 8 && fy < c.y + c.h + 8) doom = true;
+        if (doom) {
+          const [bx, by] = norm(-p.vx, -p.vy);
+          if (p.dashCd <= 0) {
+            mvx = bx;
+            mvy = by;
+            intents.dash = true;
+            a.tackleT = 0;
+          } else if (p.airCd <= 0) intents.jump = true;
+          a.recState = -1; // spent
+        }
+      }
+    }
+  } else {
+    a.recState = 0;
+  }
+
   const n = norm(mvx, mvy);
   intents.move = mvx || mvy ? n : [0, 0];
+  return intents;
+}
+
+/**
+ * A bot's afterlife: drift toward the nearest living rival and, when one is
+ * within reach, let out a gust — eagerly if the shove would be fatal, now
+ * and then just for mischief. Easier tiers haunt half-heartedly.
+ */
+export function ghostThink(p: Player): Intents {
+  const intents: Intents = { move: [0, 0], aimX: p.aim[0], aimY: p.aim[1] };
+  let best: Player | null = null;
+  let bd = Infinity;
+  for (const q of game.players) {
+    if (!q.alive || !p.isEnemy(q)) continue;
+    const d = dist(p.gx, p.gy, q.x, q.y);
+    if (d < bd) {
+      bd = d;
+      best = q;
+    }
+  }
+  if (!best) return intents;
+  const [tx, ty] = norm(best.x - p.gx, best.y - p.gy);
+  if (bd > 48) intents.move = [tx, ty];
+  if (p.booCd <= 0 && bd < 70 && !best.airborne) {
+    const eager = [0.25, 0.5, 0.85][clamp(game.difficulty, 0, 2)];
+    const deadly = shoveIsDeadly(best, tx, ty);
+    // rolled once per opportunity: on a "no", wait a beat before reconsidering
+    if (Math.random() < (deadly ? eager : eager * 0.12)) intents.dash = true;
+    else p.booCd = 0.5;
+  }
   return intents;
 }

@@ -1,4 +1,4 @@
-import type { Arena, Rect, Spawn, Portal, CrusherDef, SwitchDef, GateDef } from '../types';
+import type { Arena, Rect, Spawn, Portal, CrusherDef, SwitchDef, GateDef, BumperDef } from '../types';
 
 /**
  * Selectable arenas. Geometry/spawns/hazards for the *current* arena are
@@ -343,6 +343,84 @@ export const ARENAS: Arena[] = [
       { x: 938, y: 320 },
     ],
   },
+  {
+    name: 'Pinball',
+    tagline: 'Spring posts fire everything back — faster',
+    biome: 'neon',
+    floorA: '#2d1f3d',
+    floorB: '#271a35',
+    accent: '#ff7ad0',
+    // two slim side rails; the table itself belongs to the bumpers
+    obstacles: [
+      { x: 168, y: 262, w: 30, h: 116 },
+      { x: 826, y: 262, w: 30, h: 116 },
+    ],
+    pits: [],
+    bushes: [
+      { x: 470, y: 70, w: 84, h: 62 },
+      { x: 470, y: 508, w: 84, h: 62 },
+    ],
+    crushers: [],
+    // the drain: fall out of one side lane, pop back in on the other
+    portals: [{ ax: 86, ay: 320, bx: 938, by: 320, r: 22 }],
+    gates: [],
+    switches: [],
+    // a quincunx of spring-loaded posts: boomerangs leave them FASTER than
+    // they arrived (with flight time to spare), and anyone dashing or
+    // shoved into one is pinged straight back off
+    bumpers: [
+      { x: 512, y: 320, r: 30 },
+      { x: 352, y: 214, r: 22 },
+      { x: 672, y: 214, r: 22 },
+      { x: 352, y: 426, r: 22 },
+      { x: 672, y: 426, r: 22 },
+    ],
+    spawns: [
+      { x: 95, y: 95 },
+      { x: 929, y: 95 },
+      { x: 95, y: 545 },
+      { x: 929, y: 545 },
+      { x: 512, y: 190 },
+      { x: 512, y: 450 },
+    ],
+  },
+  {
+    name: 'Sumo',
+    tagline: 'An island in the void — push comes to shove',
+    biome: 'rooftop',
+    floorA: '#2b2a3f',
+    floorB: '#252339',
+    accent: '#ffce54',
+    // four low stumps for cover; nothing to hide behind for long
+    obstacles: [
+      { x: 300, y: 196, w: 44, h: 44 },
+      { x: 680, y: 196, w: 44, h: 44 },
+      { x: 300, y: 400, w: 44, h: 44 },
+      { x: 680, y: 400, w: 44, h: 44 },
+    ],
+    // the ring: a moat of nothing on every side. Out is out.
+    pits: [
+      { x: 210, y: 30, w: 604, h: 66 },
+      { x: 210, y: 544, w: 604, h: 66 },
+      { x: 30, y: 190, w: 76, h: 260 },
+      { x: 918, y: 190, w: 76, h: 260 },
+    ],
+    bushes: [],
+    crushers: [],
+    portals: [],
+    gates: [],
+    switches: [],
+    // the centre post turns any charge through the middle into a launch
+    bumpers: [{ x: 512, y: 320, r: 28 }],
+    spawns: [
+      { x: 110, y: 110 },
+      { x: 914, y: 110 },
+      { x: 110, y: 530 },
+      { x: 914, y: 530 },
+      { x: 512, y: 170 },
+      { x: 512, y: 470 },
+    ],
+  },
 ];
 
 /** The arena currently in play (live binding; reassigned by `setArena`). */
@@ -355,6 +433,7 @@ export let CRUSHERS: CrusherDef[] = arena.crushers;
 export let PORTALS: Portal[] = arena.portals;
 export let SWITCHES: SwitchDef[] = arena.switches;
 export let GATES: GateDef[] = arena.gates;
+export let BUMPERS: BumperDef[] = arena.bumpers ?? [];
 
 /** Select the active arena by index, republishing the live bindings. */
 export function setArena(i: number): void {
@@ -367,4 +446,5 @@ export function setArena(i: number): void {
   PORTALS = arena.portals;
   SWITCHES = arena.switches;
   GATES = arena.gates;
+  BUMPERS = arena.bumpers ?? [];
 }

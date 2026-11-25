@@ -53,6 +53,11 @@ export function spawnSlice(x: number, y: number, char: Char, dirx: number, diry:
     game.particles.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp, rand(0.3, 0.6), '#fff', rand(2, 5)));
   }
   game.particles.push(new Particle(x, y, 0, 0, 0.45, char.body, 80, 'ring'));
+  // the cut itself, and the dearly departed drifting off to snack heaven
+  if (dirx || diry) spawnCut(x, y, dirx, diry);
+  const soul = new Particle(x, y - 6, 0, -46, 1.5, '#fff', 17, 'soul');
+  soul.char = char;
+  game.particles.push(soul);
 }
 
 export function spawnExplosion(x: number, y: number): void {
@@ -115,4 +120,45 @@ export function spawnConfetti(x: number, y: number, n: number): void {
       new Particle(x + rand(-30, 30), y, rand(-60, 60), rand(20, 90), rand(2.2, 3.6), cols[i % cols.length], rand(5, 9), 'confetti')
     );
   }
+}
+
+/** A handful of quick sparks flung from a point (clangs, grazes, bumpers). */
+export function spawnSparks(x: number, y: number, color: string, n = 8): void {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, TAU);
+    const sp = rand(90, 300);
+    game.particles.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp, rand(0.12, 0.3), Math.random() < 0.6 ? '#fff' : color, rand(1.5, 3.2)));
+  }
+}
+
+/**
+ * A directional impact burst: a cone of streak-sparks thrown along (dx, dy)
+ * plus a flat "hit flash" star at the contact point. The shared language for
+ * parries, tackles and anything else that connects without killing.
+ */
+export function spawnImpact(x: number, y: number, dx: number, dy: number, color: string): void {
+  const base = Math.atan2(dy, dx);
+  for (let i = 0; i < 9; i++) {
+    const a = base + rand(-0.7, 0.7);
+    const sp = rand(160, 420);
+    const s = new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp, rand(0.14, 0.3), i % 3 ? '#fff' : color, rand(2, 3.5), 'streak');
+    game.particles.push(s);
+  }
+  const f = new Particle(x, y, 0, 0, 0.14, '#fff', 26, 'flash');
+  f.rot = base;
+  game.particles.push(f);
+}
+
+/** A soft puff of steam (fire meeting ice, doused flames). */
+export function spawnSteam(x: number, y: number, n = 10): void {
+  for (let i = 0; i < n; i++) {
+    game.particles.push(new Particle(x + rand(-8, 8), y + rand(-8, 8), rand(-40, 40), rand(-70, -20), rand(0.5, 0.9), 'rgba(232,246,255,.5)', rand(5, 10)));
+  }
+}
+
+/** The long white cut-line that flashes across a fighter as they're sliced. */
+export function spawnCut(x: number, y: number, dx: number, dy: number): void {
+  const f = new Particle(x, y, 0, 0, 0.16, '#fff', 74, 'cut');
+  f.rot = Math.atan2(dy, dx);
+  game.particles.push(f);
 }

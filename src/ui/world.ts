@@ -7,7 +7,7 @@ import { arena } from '../data/arena';
 import { CHARS } from '../data/characters';
 import { POWERS } from '../data/powers';
 import { drawBoomShape, drawProp } from '../gfx/shapes';
-import { drawArena } from './arena';
+import { drawArena, drawBumpers, drawBushCanopies, drawBushStumps } from './arena';
 
 /** Weather overlay: slanting rain — or drifting snow on the ice biome. */
 function drawWeather(): void {
@@ -38,6 +38,84 @@ function drawWeather(): void {
       ctx.moveTo(x, y);
       ctx.lineTo(x - 4, y + 14);
       ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * Per-biome atmosphere, cheap and stateless (every mote's position is a pure
+ * function of time): fireflies in the grove, lamp-pools and dust in the
+ * diner, roaming neon wash in the arcade, cloud shadows on the rooftops,
+ * a little snow in the cold rooms. Kept faint — mood, never noise.
+ */
+function drawAmbience(): void {
+  const t = game.time;
+  const iw = W - WALL * 2;
+  const ih = H - WALL * 2;
+  ctx.save();
+  if (arena.biome === 'grove') {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 12; i++) {
+      const x = WALL + ((i * 173.3 + Math.sin(t * 0.31 + i * 1.7) * 70 + t * (6 + (i % 3) * 3)) % iw + iw) % iw;
+      const y = WALL + ((i * 97.7 + Math.cos(t * 0.27 + i * 2.3) * 50) % ih + ih) % ih;
+      const tw = 0.35 + 0.35 * Math.sin(t * 2.2 + i * 1.9);
+      if (tw <= 0.05) continue;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 9);
+      g.addColorStop(0, `rgba(210,255,140,${0.5 * tw})`);
+      g.addColorStop(1, 'rgba(210,255,140,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - 9, y - 9, 18, 18);
+    }
+  } else if (arena.biome === 'diner') {
+    ctx.globalCompositeOperation = 'lighter';
+    // warm pendant-lamp pools, breathing very slightly
+    for (const [lx, ly] of [[W * 0.27, H * 0.5], [W * 0.73, H * 0.5], [W * 0.5, H * 0.22], [W * 0.5, H * 0.8]]) {
+      const r = 170 + Math.sin(t * 0.9 + lx) * 6;
+      const g = ctx.createRadialGradient(lx, ly, 10, lx, ly, r);
+      g.addColorStop(0, 'rgba(255,196,120,.085)');
+      g.addColorStop(1, 'rgba(255,196,120,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(lx - r, ly - r, r * 2, r * 2);
+    }
+    ctx.fillStyle = 'rgba(255,236,200,.22)';
+    for (let i = 0; i < 16; i++) {
+      const x = WALL + ((i * 211.7 + Math.sin(t * 0.2 + i) * 40) % iw + iw) % iw;
+      const y = WALL + ((i * 131.1 - t * (5 + (i % 4) * 2)) % ih + ih) % ih;
+      ctx.fillRect(x, y, 1.6, 1.6);
+    }
+  } else if (arena.biome === 'neon') {
+    ctx.globalCompositeOperation = 'lighter';
+    const cols = ['255,90,200', '90,220,255', '170,110,255'];
+    for (let i = 0; i < 3; i++) {
+      const x = W / 2 + Math.cos(t * (0.21 + i * 0.07) + i * 2.1) * iw * 0.38;
+      const y = H / 2 + Math.sin(t * (0.17 + i * 0.05) + i * 1.3) * ih * 0.36;
+      const g = ctx.createRadialGradient(x, y, 20, x, y, 230);
+      g.addColorStop(0, `rgba(${cols[i]},.09)`);
+      g.addColorStop(1, `rgba(${cols[i]},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x - 230, y - 230, 460, 460);
+    }
+  } else if (arena.biome === 'rooftop') {
+    // slow cloud shadows sliding across the roof
+    for (let i = 0; i < 3; i++) {
+      const x = ((t * (9 + i * 4) + i * 420) % (W + 500)) - 250;
+      const y = H * (0.25 + i * 0.25);
+      const g = ctx.createRadialGradient(x, y, 30, x, y, 240);
+      g.addColorStop(0, 'rgba(6,6,18,.16)');
+      g.addColorStop(1, 'rgba(6,6,18,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - 240, y - 240, 480, 480);
+    }
+  } else if (arena.biome === 'ice' && !game.raining) {
+    ctx.fillStyle = 'rgba(235,245,255,.32)';
+    for (let i = 0; i < 26; i++) {
+      const seed = i * 97.13;
+      const x = ((seed * 13.7 + Math.sin(t * 0.6 + i) * 26) % iw) + WALL;
+      const y = (((seed * 29.3 + t * 34) % ih) + ih) % ih + WALL;
+      ctx.beginPath();
+      ctx.arc(x, y, 1 + (i % 3) * 0.5, 0, TAU);
+      ctx.fill();
     }
   }
   ctx.restore();
@@ -190,6 +268,7 @@ export function drawWorld(): void {
     drawProp(d.propIdx, 19);
     ctx.restore();
   }
+  drawBushStumps();
   // hazards under players
   for (const h of game.hazards) h.draw();
   // pickups
@@ -197,12 +276,17 @@ export function drawWorld(): void {
   if (game.golden && !game.golden.carrier) drawGolden();
   // players + DECOY clones, depth-sorted together so overlap reads correctly
   const sorted = [...game.players.filter((p) => p.alive), ...game.decoys].sort((a, b) => a.y - b.y);
+  // (ghosts of the fallen float above the living, drawn after them)
   for (const e of sorted) {
     if ('char' in e) e.draw();
     else drawDecoy(e);
   }
+  drawBumpers();
+  // leafy canopies close over anyone inside them
+  drawBushCanopies();
   // crusher blocks ride above fighters, so the squished vanish beneath them
   for (const c of game.crushers) c.draw();
+  if (game.ghosts && game.mode <= 1) for (const p of game.players) if (!p.alive) p.draw();
   // a carried artifact rides above its holder
   if (game.golden && game.golden.carrier) drawGolden();
   // boomerangs on top
@@ -215,6 +299,7 @@ export function drawWorld(): void {
   drawSudden();
   // weather overlay last, over the whole field
   if (game.raining) drawWeather();
+  drawAmbience();
   // vignette caps the frame for depth (HUD is drawn after, unaffected)
   drawVignette();
 }
