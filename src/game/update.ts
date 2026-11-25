@@ -505,6 +505,7 @@ export function update(dt: number): void {
     game.decoys = game.decoys.filter((d) => d.life > 0);
     // hazards
     game.hazards = game.hazards.filter((h) => h.update(dt));
+    if (game.hazards.length > MAX_HAZARDS) game.hazards.splice(0, game.hazards.length - MAX_HAZARDS); // oldest patches go first
     // pickups
     game.pickups = game.pickups.filter((pk) => pk.update(dt));
     // cleanup dead boomerangs
@@ -544,4 +545,14 @@ export function update(dt: number): void {
   }
 
   game.particles = game.particles.filter((p) => p.update(dt));
+  // Budget: a six-way brawl with stacked fire powers can ask for thousands of
+  // embers. Past the cap the oldest plain sparks are dropped first (the
+  // storytelling particles — halves, text, rings, souls — always survive).
+  if (game.particles.length > MAX_PARTICLES) {
+    let excess = game.particles.length - MAX_PARTICLES;
+    game.particles = game.particles.filter((p) => !(excess > 0 && (p.kind === 'spark' || p.kind === 'streak' || p.kind === 'chunk') && excess--));
+  }
 }
+
+const MAX_PARTICLES = 900;
+const MAX_HAZARDS = 220;

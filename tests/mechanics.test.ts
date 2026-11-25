@@ -337,7 +337,9 @@ describe('round flow', () => {
     expect(game.state).toBe('matchover');
     const awards = computeAwards(8);
     expect(awards.length).toBeGreaterThanOrEqual(4);
-    expect(new Set(awards.map((x) => x.player)).size).toBeGreaterThanOrEqual(3);
+    // nobody leaves the podium empty-handed
+    expect(new Set(awards.map((x) => x.player)).size).toBe(4);
+    expect(new Set(awards.map((x) => x.title)).size).toBe(awards.length);
   });
 });
 
@@ -364,7 +366,8 @@ describe('invariants under chaos', () => {
         }
         for (const b of game.boomerangs) expect(Number.isFinite(b.x) && Number.isFinite(b.vx), 'boomerang went non-finite').toBe(true);
         expect(game.boomerangs.length).toBeLessThan(80);
-        expect(game.particles.length).toBeLessThan(2500);
+        expect(game.particles.length).toBeLessThanOrEqual(1100);
+        expect(game.hazards.length).toBeLessThanOrEqual(260);
       }
     }
   });

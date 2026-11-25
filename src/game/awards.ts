@@ -82,18 +82,23 @@ export function allAwards(): (Award & { w: number })[] {
 /**
  * The podium line-up: up to `max` awards. First everyone's single best
  * story, then the best of what's left — capped per fighter so one snack
- * can't hog the whole ceremony.
+ * can't hog the whole ceremony. Nobody leaves empty-handed: a fighter who
+ * topped no chart is handed an unclaimed award they at least qualified for,
+ * and failing even that, the Participation Trophy.
  */
 export function computeAwards(max = 8): Award[] {
   const all = allAwards();
   const picked: (Award & { w: number })[] = [];
   const count = new Map<Player, number>();
   for (const p of game.players) {
-    const a = all.find((x) => x.player === p);
-    if (a) {
-      picked.push(a);
-      count.set(p, 1);
+    let a = all.find((x) => x.player === p);
+    if (!a) {
+      // consolation: the best award they qualify for that nobody else took
+      const def = DEFS.filter((d) => d.value(p) >= d.threshold && !all.some((x) => x.title === d.title)).sort((x, y) => y.w - x.w)[0];
+      a = def ? { title: def.title, player: p, detail: def.detail(def.value(p)), w: def.w - 1 } : { title: 'Participation Trophy', player: p, detail: 'showed up · mostly', w: 0 };
     }
+    picked.push(a);
+    count.set(p, 1);
   }
   const cap = Math.max(2, Math.ceil(max / Math.max(1, game.players.length)) + 1);
   for (const a of all) {
